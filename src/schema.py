@@ -300,6 +300,13 @@ class PageResult(BaseModel):
     )
     rule_scores: dict[DocType, float] = Field(default_factory=dict)
     strong_signature_matched: bool = False
+    matched_class_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of doc types with a non-zero raw score. Guards the "
+        "narrow-margin check: a margin computed over fewer than two classes "
+        "reflects absent evidence, not genuine competition between types.",
+    )
     matched_signals: list[str] = Field(
         default_factory=list,
         description="Signature strings that fired. These come from "

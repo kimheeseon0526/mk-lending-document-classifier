@@ -44,6 +44,7 @@ delegation:
   rule_score_threshold: 0.60
   rule_margin_threshold: 0.20
   delegate_on_conflicting_strong_signals: true
+  require_multiple_classes_for_margin_check: true
 
 # -----------------------------------------------------------------------------
 # Page markers
