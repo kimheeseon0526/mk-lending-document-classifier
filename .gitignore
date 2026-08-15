@@ -1,12 +1,15 @@
 # Source PDFs are excluded under the assessment's data-use restrictions.
-data/
+data/**
+!data/
+!data/ground_truth_*.csv
 *.pdf
 
 # Secrets
 .env
 
 # Generated artifacts
-outputs/
+outputs/**
+!outputs/
 !outputs/.gitkeep
 
 # Python

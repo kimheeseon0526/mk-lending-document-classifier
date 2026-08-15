@@ -23,7 +23,10 @@
       "Edit(src/**)",
       "Edit(tests/**)",
       "Edit(scripts/**)",
-      "Edit(docs/**)"
+      "Edit(docs/**)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_rule_classifier.py -v)",
+      "Bash(.venv/Scripts/python -m pytest -v)",
+      "Bash(.venv/Scripts/python -m src.rule_classifier \"data/package_01/01.990145627_shuffled.pdf\")"
     ],
     "deny": [
       "Bash(git add:*)",
