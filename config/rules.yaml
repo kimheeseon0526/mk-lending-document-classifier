@@ -1,0 +1,297 @@
+# =============================================================================
+# Rule configuration for the mortgage document page classifier.
+#
+# Adding a new document type means adding one block under `doc_types` and one
+# entry under `instance_identifiers`. No Python change is required.
+#
+# All signals below were verified against package_01. They are development-set
+# signals: they were chosen after inspecting the data, so they do not
+# constitute independent generalization evidence.
+# =============================================================================
+
+version: "1.0.0"
+
+# -----------------------------------------------------------------------------
+# Scoring
+#
+# rule_score is a heuristic evidence score, not a calibrated probability.
+#
+#   raw[c]    = sum of weights of signals of class c that matched
+#   share[c]  = raw[c] / sum(raw)                      (0 when sum is 0)
+#   mass      = min(1.0, raw[top1] / evidence_saturation)
+#   rule_score  = share[top1] * mass
+#   rule_margin = share[top1] - share[top2]
+#
+# With the defaults below a single strong signal yields rule_score 1.0, while a
+# single weak signal yields 0.25 and therefore falls under the delegation
+# threshold. That is intentional: one weak keyword should not be enough.
+# -----------------------------------------------------------------------------
+scoring:
+  strong_weight: 1.0
+  weak_weight: 0.25
+  evidence_saturation: 1.0
+  case_sensitive: false
+
+# -----------------------------------------------------------------------------
+# LLM delegation
+#
+# Evaluated in order. A strong signature short-circuits everything else.
+# Values are development heuristics tuned on package_01.
+# -----------------------------------------------------------------------------
+delegation:
+  strong_signature_short_circuit: true
+  short_text_threshold: 100      # normalized (whitespace-collapsed) length
+  rule_score_threshold: 0.60
+  rule_margin_threshold: 0.20
+  delegate_on_conflicting_strong_signals: true
+
+# -----------------------------------------------------------------------------
+# Page markers
+#
+# Applied in ascending `priority`; the first match wins and later patterns are
+# not attempted. This ordering matters: "Page 7 of 11" also satisfies the
+# generic "N of M" pattern, so PAGE_N_OF_M must be tried first. The resulting
+# `marker_style` is retained because URLA_1003 and CREDIT_REPORT both report a
+# total of 11 in package_01 and the style is what separates them.
+#
+# Markers are structural signals. They feed grouping, and they contribute to
+# classification only in combination with a form-name signal.
+# -----------------------------------------------------------------------------
+markers:
+  - style: CLTA_PAGE_N
+    priority: 10
+    regex: 'CLTA\s+Preliminary\s+Report\s+Form.*?Page\s+(?P<page>\d{1,3})'
+    flags: [IGNORECASE, DOTALL]
+    total_group: null
+
+  - style: PAGE_N_OF_M
+    priority: 20
+    regex: 'Page\s+(?P<page>\d{1,3})\s+of\s+(?P<total>\d{1,3})'
+    flags: [IGNORECASE]
+
+  - style: N_OF_M
+    priority: 30
+    regex: '(?P<page>\d{1,3})\s+of\s+(?P<total>\d{1,3})'
+    flags: [IGNORECASE]
+
+marker_constraints:
+  max_total: 500          # reject absurd captures from body text
+  reject_if_page_gt_total: true
+
+# -----------------------------------------------------------------------------
+# Document instance identifiers
+#
+# Used only in-process to build a run-local surrogate id such as
+# "CREDIT_REPORT#1". Raw values are never persisted.
+#
+# Note: in package_01 the loan number appears on both CREDIT_REPORT (14 pages)
+# and URLA_1003 (4 pages). An identifier alone therefore cannot group pages;
+# it is always combined with doc_type, marker_style and marker_total.
+# -----------------------------------------------------------------------------
+instance_identifiers:
+  - name: loan_number
+    regex: 'Loan\s*Number[:\s]*(\d{6,12})'
+    scope: [URLA_1003, CREDIT_REPORT]
+  - name: report_id
+    regex: 'Report\s*ID[:\s]*(\d{6,12})'
+    scope: [CREDIT_REPORT]
+  - name: prelim_number
+    regex: 'PRELIM\s*(?:NO\.?|Number)[:\s]*([\d\-]{6,20})'
+    scope: [TITLE_REPORT]
+  - name: form_family
+    regex: '(Freddie\s+Mac\s+Form\s+65)'
+    scope: [URLA_1003]
+
+# -----------------------------------------------------------------------------
+# PII masking applied before any text leaves the process.
+#
+# The policy separates identifiers from meaning. Monetary amounts, occupation
+# names, form titles and document-type tokens are preserved because they carry
+# the classification signal; the P&L page in package_01 has no standard income
+# keywords and would become unclassifiable if amounts were masked.
+# -----------------------------------------------------------------------------
+masking:
+  preserve_tokens:
+    - "Realtor"
+    - "CTEC"
+    - "Profit & Loss"
+    - "Statement"
+    - "Total Expenses"
+    - "Net Income"
+    - "Sales"
+
+  # Order matters: specific identifier patterns run before the generic
+  # long-digit rule so that formatted amounts are never reached.
+  patterns:
+    - name: ssn
+      regex: '\b\d{3}-\d{2}-\d{4}\b'
+      replacement: "[SSN]"
+    - name: email
+      regex: '\b[\w.+-]+@[\w-]+\.[\w.-]+\b'
+      replacement: "[EMAIL]"
+    - name: phone
+      regex: '\b\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b'
+      replacement: "[PHONE]"
+    - name: zip_state_line
+      regex: '\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b'
+      replacement: "[CITY_STATE_ZIP]"
+    - name: street_address
+      regex: '\b\d{1,6}\s+[A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*){0,3}\s+(?:St|Street|Rd|Road|Ave|Avenue|Blvd|Boulevard|Way|Dr|Drive|Ct|Court|Ln|Lane|Ter|Terrace)\b\.?'
+      replacement: "[ADDRESS]"
+    - name: ctec_number
+      regex: '(CTEC\s*#\s*)[A-Z]?\d{4,10}'
+      replacement: '\1[ID]'
+    - name: bare_long_digits
+      regex: '(?<![\d.,$])\b\d{8,}\b(?![\d.,])'
+      replacement: "[ID]"
+
+  # Amounts must survive masking. Verified against the package_01 P&L page.
+  never_mask_regex:
+    - '\$\s?[\d,]+\.?\d*'
+    - '\b\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b'
+
+  # Personal names cannot be removed reliably by regex alone. Detected names
+  # are replaced, and the residual risk is documented in the README.
+  name_masking:
+    enabled: true
+    strategy: "signature_line_heuristic"
+    replacement: "[NAME]"
+    note: >
+      Replaces capitalized two-to-three token sequences that appear adjacent to
+      signature, borrower or applicant labels. Incomplete by construction.
+
+  max_excerpt_chars: 1200
+
+# -----------------------------------------------------------------------------
+# Document type signals
+#
+# `strong` fires a single-signal confirmation. Every string below was checked
+# for cross-class collisions across all 39 pages of package_01: zero collisions
+# and zero incorrect single-signal confirmations.
+#
+# `weak` contributes score but never confirms alone. Strings that occur across
+# multiple document types, or that are generic English, belong here.
+# -----------------------------------------------------------------------------
+doc_types:
+
+  URLA_1003:
+    strong:
+      - "Uniform Residential Loan Application"
+      - "Freddie Mac Form 65"
+      - "Fannie Mae Form 1003"
+    weak:
+      - "Section 1a. Personal Information"
+      - "Borrower Name"
+      - "Unmarried Addendum"
+      - "Continuation Sheet"
+      - "Lender Loan Information"
+      - "Demographic Information"
+    marker_affinity: [N_OF_M]
+
+  INCOME_DOC:
+    strong:
+      - "Profit & Loss Statement"
+      - "W-2 Wage and Tax Statement"
+      - "Verification of Employment"
+      - "Earnings Statement"
+      - "Form 1040"
+    weak:
+      - "CTEC"
+      - "Total Expenses"
+      - "Net Income"
+      - "Gross Pay"
+      - "Pay Period"
+      - "1099"
+    marker_affinity: [NONE]
+    # Known gap: the package_01 P&L page renders its title as an image, so no
+    # strong signal fires and the page is delegated to the LLM. This is the
+    # primary evidence for the hybrid design.
+
+  CREDIT_REPORT:
+    strong:
+      - "TUC/EXP/EQX"
+      - "XACTUS"
+      - "Credit Score Disclosure"
+      - "Your Credit Score and the Price You Pay"
+    weak:
+      - "Order Verifications"
+      - "Underwriting Alerts"
+      - "Notice to the Home Loan Applicant"
+      - "Credit Repositories"
+      - "Tradeline"
+      - "Manner of Payment"
+      - "Trended Data"
+    marker_affinity: [PAGE_N_OF_M]
+    # The vendor logo is a raster image, so the brand name is absent from the
+    # text layer on 9 of 18 pages. The repository code "TUC/EXP/EQX" covers
+    # those pages. The vendor street address also covers them but is excluded
+    # as overfitting to this dataset.
+
+  TITLE_REPORT:
+    strong:
+      - "CLTA Preliminary Report Form"
+      - "Preliminary Title Report"
+      - "Fidelity National Title"
+      - "Title Commitment"
+      - "PRELIM NO."
+      - "Prelim Number"
+    weak:
+      - "EXHIBIT A"
+      - "Legal Description"
+      - "Trustor/Grantor"
+      - "Deed of Trust"
+      - "END OF EXCEPTIONS"
+      - "INFORMATIONAL NOTES"
+    marker_affinity: [CLTA_PAGE_N]
+
+  OTHER:
+    strong: []
+    weak: []
+    marker_affinity: []
+    # No positive signals by design. OTHER is assigned when no class reaches
+    # threshold and the LLM either declines or is unavailable. There are zero
+    # OTHER pages in package_01, so this path is unvalidated.
+
+# -----------------------------------------------------------------------------
+# Ambiguous strings, listed explicitly so that they are never promoted to
+# `strong` by a later edit. Each occurs in more than one document type or is
+# generic enough to misfire.
+# -----------------------------------------------------------------------------
+never_strong:
+  - "Schedule A"
+  - "Schedule B"
+  - "ALTA"
+  - "1099"
+  - "CTEC"
+  - "Inquiries"
+  - "Credit Account"
+  - "FICO"
+  - "Vesting"
+  - "MK LENDING CORP."
+  - "Order Verifications"
+  - "Loan Number"
+  - "Borrower"
+
+# -----------------------------------------------------------------------------
+# Logical reconstruction, MVP scope.
+#
+# Three tiers only. Deeper evidence ladders were considered and dropped: the
+# additional tiers cannot be validated against package_01 and would ship as
+# untested code.
+# -----------------------------------------------------------------------------
+reconstruction:
+  enabled: true
+  tiers:
+    - name: strong_identifier_and_marker
+      requires: [doc_type, instance_id, marker_style, marker_page]
+      evidence_label: "identifier_and_marker_match"
+    - name: form_family_and_marker
+      requires: [doc_type, marker_style, marker_page]
+      evidence_label: "marker_match_within_unique_instance"
+      emit_warning: true
+    - name: insufficient
+      action: orphan
+      evidence_label: "insufficient_evidence"
+
+  duplicate_policy: "keep_both_and_flag"
+  conflicting_marker_total_policy: "split_into_separate_documents"
