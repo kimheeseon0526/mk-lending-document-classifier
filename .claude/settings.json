@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(python:*)",
+      "Bash(pytest:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(.venv/Scripts/pytest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Read(src/**)",
+      "Read(tests/**)",
+      "Read(scripts/**)",
+      "Read(config/**)",
+      "Read(docs/**)",
+      "Write(src/**)",
+      "Write(tests/**)",
+      "Write(scripts/**)",
+      "Write(docs/**)",
+      "Edit(src/**)",
+      "Edit(tests/**)",
+      "Edit(scripts/**)",
+      "Edit(docs/**)"
+    ],
+    "deny": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(rm:*)",
+      "Bash(del:*)",
+      "Bash(pip install:*)",
+      "Edit(src/schema.py)",
+      "Edit(config/rules.yaml)",
+      "Edit(.gitignore)",
+      "Write(src/schema.py)",
+      "Write(config/rules.yaml)",
+      "Read(.env)"
+    ]
+  }
+}
