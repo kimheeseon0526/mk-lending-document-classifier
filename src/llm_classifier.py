@@ -451,39 +451,27 @@ def validate_response(
 # ---------------------------------------------------------------------------
 
 
-def classify_pages(
-    pages: list[ExtractedPage],
-    rule_results: list[PageResult],
+def resolve_delegated_pages(
+    delegated: list[PageResult],
+    pages_by_number: dict[int, ExtractedPage],
     rules: dict,
     config: LLMRuntimeConfig,
 ) -> tuple[list[PageResult], list[LLMCallRecord]]:
-    """Resolve every page `should_delegate` flags; pass the rest through untouched.
+    """Batch, call, validate, and retry/fall back for exactly `delegated` pages.
 
-    `llm_confidence` and `rule_score` are never compared or combined here
-    (or anywhere in this module): they are heuristic numbers on different,
-    uncalibrated scales -- rule_score comes from keyword-weight arithmetic,
-    llm_confidence is the model's self-reported number. Treating them as
-    comparable would imply a relationship that doesn't exist.
+    This is the reusable core that both `classify_pages` (which first
+    narrows `delegated` down via `should_delegate`) and
+    `pipeline.run_pipeline`'s LLM_ONLY mode (which treats every page as
+    delegated, bypassing `should_delegate` entirely) call -- pulled out so
+    "send every page to the LLM" doesn't require a second copy of the
+    batching/retry/validation logic.
 
-    Never mutates the `PageResult` objects passed in via `rule_results`:
-    every revised result is a fresh `model_copy`, so the caller's original
-    list is unaffected by this call.
+    Assumes `config.enabled` is True; callers are responsible for handling
+    the disabled case before reaching here (see `classify_pages`).
+
+    Never mutates the `PageResult` objects in `delegated`: every revised
+    result is a fresh `model_copy`.
     """
-    pages_by_number = {p.page_number: p for p in pages}
-
-    passthrough: list[PageResult] = []
-    delegated: list[PageResult] = []
-    for result in rule_results:
-        delegate, _ = should_delegate(result, rules)
-        (delegated if delegate else passthrough).append(result)
-
-    if not config.enabled:
-        disabled = [
-            r.model_copy(update={"warnings": r.warnings + [WarningCode.LLM_DISABLED]})
-            for r in delegated
-        ]
-        return passthrough + disabled, []
-
     rule_by_page = {r.page_number: r for r in delegated}
     requests = [
         build_request(pages_by_number[page_number], rules, config.max_excerpt_chars)
@@ -590,6 +578,43 @@ def classify_pages(
             )
         )
 
+    return resolved, call_records
+
+
+def classify_pages(
+    pages: list[ExtractedPage],
+    rule_results: list[PageResult],
+    rules: dict,
+    config: LLMRuntimeConfig,
+) -> tuple[list[PageResult], list[LLMCallRecord]]:
+    """Resolve every page `should_delegate` flags; pass the rest through untouched.
+
+    `llm_confidence` and `rule_score` are never compared or combined here
+    (or anywhere in this module): they are heuristic numbers on different,
+    uncalibrated scales -- rule_score comes from keyword-weight arithmetic,
+    llm_confidence is the model's self-reported number. Treating them as
+    comparable would imply a relationship that doesn't exist.
+
+    Never mutates the `PageResult` objects passed in via `rule_results`:
+    every revised result is a fresh `model_copy`, so the caller's original
+    list is unaffected by this call.
+    """
+    pages_by_number = {p.page_number: p for p in pages}
+
+    passthrough: list[PageResult] = []
+    delegated: list[PageResult] = []
+    for result in rule_results:
+        delegate, _ = should_delegate(result, rules)
+        (delegated if delegate else passthrough).append(result)
+
+    if not config.enabled:
+        disabled = [
+            r.model_copy(update={"warnings": r.warnings + [WarningCode.LLM_DISABLED]})
+            for r in delegated
+        ]
+        return passthrough + disabled, []
+
+    resolved, call_records = resolve_delegated_pages(delegated, pages_by_number, rules, config)
     return passthrough + resolved, call_records
 
 
