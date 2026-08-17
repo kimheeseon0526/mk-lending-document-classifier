@@ -46,9 +46,10 @@ visualize.py          페이지 스트립·confusion matrix 이미지 (--viz 제
 
 `pipeline.py`가 위 단계를 순서대로 호출하고 `scripts/run.py`가 CLI 진입점이다.
 
-**룰 + LLM 결합 근거**: 룰 시그니처만으로 39페이지 중 37페이지가 결정론적으로
-확정된다(4절). 남은 2페이지만 LLM 위임 대상으로 남기면 재현성(같은 입력에 같은
-결과)을 유지하면서 애매한 페이지에만 추가 판단을 구할 수 있다. 전 페이지를
+**룰 + LLM 결합 근거**: package_01에서는 룰 시그니처만으로 39페이지 중
+37페이지가 위임 불필요로 판단되고, p8과 p36 2페이지만 LLM 위임 대상으로
+탐지됐다(6절). 재현성(같은 입력에 같은 결과)을 유지하면서 애매한 페이지에만
+추가 판단을 구할 수 있다. 전 페이지를
 LLM에 보내는 방식은 실행마다 결과가 달라질 위험과 비용·속도 부담이 있어 채택하지
 않았다 (11절).
 
@@ -107,7 +108,7 @@ pytest -v
 | `page_results.csv` | 페이지별 최종 라벨. 주요 컬럼: `page_number`, `doc_type`, `decision_source`, `rule_score`, `rule_margin`, `marker_style`, `marker_page`, `marker_total`, `instance_id`, `is_orphan`, `warnings` |
 | `physical_groups.csv` | 물리적 연속 그룹. `group_id`, `doc_type`, `start_page`, `end_page`, `page_count`, `physical_pages` |
 | `reconstructed_documents.csv` | 재조립 문서. `doc_id`, `doc_type`, `instance_id`, `marker_style`, `expected_pages`, `observed_logical_pages`, `missing_logical_pages`, `first_page_at`, `last_page_at`, `physical_span`, `is_contiguous`, `completeness`, `issues`, `logical_to_physical` |
-| `run_report.json` | 실행 통계 (`RunReport`) — 총 페이지, 룰 확정 수, LLM 위임/호출/fallback 수, orphan 목록 등 |
+| `run_report.json` | 실행 통계 (`RunReport`) — 총 페이지, 룰 최종 출력 페이지 수, LLM 위임 대상/호출/fallback 수, orphan 목록 등 |
 | `evaluation.json` / `evaluation.txt` | `--truth` 제공 시 생성. 정확도·클래스별 지표·confusion matrix |
 | `page_strip.png` / `confusion_matrix.png` | `--viz` 제공 시 생성 |
 
@@ -123,9 +124,12 @@ Title Report)를 함께 제공한다. `scripts/build_ground_truth.py`가 각 페
 중복 매칭 없음을 검증한 뒤에만 CSV를 쓴다. 별도 정답지 파일 없이 39페이지
 전량을 이 방식으로 라벨링했다.
 
-**지표**: accuracy, 클래스별 precision/recall/F1, macro-F1(support>0 클래스
-평균). `OTHER`처럼 정답 표본이 0개인 클래스는 recall/F1을 0.0이 아니라 `N/A`로
-표기하고 macro 평균에서 제외한다 — 0.0으로 채우면 macro-F1이 0.788로 왜곡된다.
+**지표**: accuracy, 클래스별 precision/recall/F1,
+`macro_f1_supported`. `macro_f1_supported`는 package_01에서 support가 1 이상인
+4개 클래스(`URLA_1003`, `INCOME_DOC`, `CREDIT_REPORT`, `TITLE_REPORT`)만 평균한
+프로젝트 정의 지표다. `OTHER`는 support 0이라 recall/F1을 0.0이 아니라 `N/A`로
+표기하고 평균에서 제외한다. 일반적인 고정 5클래스 macro-F1과 구분하기 위해
+이름을 `macro_f1_supported`로 쓰며, 전체 클래스 macro-F1처럼 표현하지 않는다.
 
 **결과 (rule-only, package_01, 39페이지)**:
 
@@ -155,6 +159,18 @@ OTHER                  0      0       0       0      0
 오분류는 페이지 8 한 건뿐이다(실제 `TITLE_REPORT`, 예측 `OTHER`). 자세한 원인은
 8절 참고.
 
+`run_report.json`의 `rule_resolved`는 충분한 신뢰도로 확정된 페이지 수가 아니라,
+최종 `decision_source`가 `RULE`인 페이지 수다. rule-only 모드에서는 위임 대상으로
+탐지된 페이지도 최종 출력이 룰 결과로 남기 때문에 package_01의 실행 통계는 아래처럼
+구분해 읽어야 한다.
+
+| 항목 | 값 |
+|---|---|
+| 룰 최종 출력 페이지 (`rule_resolved`) | 39 |
+| 위임 불필요 페이지 | 37 |
+| LLM 위임 대상으로 탐지된 페이지 | 2 (p8, p36) |
+| 실제 LLM 호출 페이지 | 0 |
+
 ![Page classification strip](outputs/package_01/page_strip.png)
 
 정답 행과 예측 행이 다른 페이지는 p8 한 장이며(`evaluation.txt`의
@@ -176,8 +192,10 @@ package_02는 정답지가 없는 추가 입력으로 사용했으며, 최초 �
 | 항목 | 값 |
 |---|---|
 | 총 페이지 | 44 |
-| 룰 확정 | 44 |
-| LLM 위임 대상 | 4 (실제 호출 0건) |
+| 룰 최종 출력 페이지 (`rule_resolved`) | 44 |
+| 위임 불필요 페이지 | 40 |
+| LLM 위임 대상으로 탐지된 페이지 | 4 |
+| 실제 LLM 호출 페이지 | 0 |
 | 물리적 그룹 | 44 |
 | 재조립 문서 | 4 |
 | orphan 페이지 | 11 |
@@ -250,10 +268,10 @@ IRS 트랜스크립트 2건(2024년, 2025년)이다.
   신용조회기관 발행물이지만 신용보고서 본체는 아니다. 5개 라벨 정의만으로는
   단정할 수 없어 위임 대상으로 남겼다.
 - **orphan 11페이지**: 페이지 마커가 없어 원본 문서로 되돌릴 근거가 없는
-  페이지다. 재조립의 정의상 예상된 결과이며 오류가 아니다.
+  페이지다. 재조립 정의상 증거가 부족하면 붙이지 않고 남겨 두는 결과다.
 - 시그니처 추가는 **발견된 서식 계열 2종에 대한 대응**이다. 세 번째 계열을
-  만나면 같은 문제가 재발한다. 근본 해결은 시그니처 확장이 아니라 위임 경로의
-  실제 동작이며, 이것이 하이브리드 설계를 택한 이유다.
+  만나면 같은 문제가 재발할 수 있다. 더 안정적인 개선 방향은 시그니처 확장만이
+  아니라 위임 경로의 실제 동작이며, 이것이 하이브리드 설계를 택한 이유다.
 
 ## 7. 그룹핑
 
@@ -383,9 +401,9 @@ monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
 
 - **전 페이지 OCR** — 39페이지 전부 텍스트 레이어가 있어(최소 68자) 불필요했다.
 - **TF-IDF + 전통 ML** — `INCOME_DOC` 학습 표본 1개, `OTHER` 0개로 과적합이
-  확정적이다.
-- **전 페이지 LLM 위임** — 재현성 저하와 비용·속도 문제로 제외했다. 룰이 37/39를
-  결정론적으로 확정한다.
+  발생할 가능성이 크다.
+- **전 페이지 LLM 위임** — 재현성 저하와 비용·속도 문제로 제외했다. package_01에서
+  37/39페이지는 위임 불필요로 판단됐다.
 - **벤더 주소를 CREDIT_REPORT 시그니처로 사용** — 데이터셋 과적합이라 제외했다.
   주소 없이도 18페이지 전체가 커버된다.
 
@@ -394,39 +412,49 @@ monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
 ## 12. 한계 및 개선 방향
 
 1. `package_01`을 룰 개발과 자체 평가에 함께 사용했다. 0.9744는 개발 데이터
-   기준이며 일반화 성능이 아니다.
-2. `INCOME_DOC` 정답이 1페이지뿐이라 해당 클래스의 precision/recall 1.0은 단일
-   표본 기준이다.
-3. `OTHER` 정답이 0개라 해당 분류 경로가 전혀 검증되지 않았다.
-4. 실제 LLM 호출부(`call_llm`)가 미구현이다. 위임 경로, 응답 검증, 재시도,
-   fallback은 테스트로 검증했지만 `gpt-5-mini` 모델 문자열과 Structured
+   기준이며 독립 일반화 성능을 보장하지 않는다. `package_02`도 rules 1.1.0
+   수정에 사용됐으므로 독립 holdout이 아니며, 정답지가 없어 accuracy는 판단할
+   수 없다.
+2. `package_01`의 클래스 분포가 작고 불균형하다. `INCOME_DOC` 정답은 1페이지뿐이고
+   `OTHER` 정답은 0페이지라 해당 클래스들의 지표와 분류 경로 해석에 한계가 있다.
+3. 실제 LLM 네트워크 호출부(`call_llm`)가 미구현이다. 위임 경로, 응답 검증,
+   재시도, fallback은 테스트로 확인했지만 `gpt-5-mini` 모델 문자열과 Structured
    Outputs API 스펙을 실제 호출로 확인하지 않았고, 실제 모델 판정 성능도
    측정하지 못했다.
-5. OCR fallback이 없다. `package_01` 39페이지는 전부 텍스트 레이어가 있었지만,
+4. OCR fallback이 없다. `package_01` 39페이지는 전부 텍스트 레이어가 있었지만,
    `package_02`의 p11/p26/p40은 정규화 텍스트 길이가 0이다(6절). 따라서
    "이 데이터셋은 OCR이 불필요하다"는 결론을 전체 패키지로 일반화할 수 없다.
    텍스트가 없는 페이지는 텍스트 전용 LLM을 연결해도 해결되지 않는다. OCR
    또는 Vision 기반 처리가 필요하지만 이번 제출 범위에서는 구현하지 않았다.
-6. 다중 문서 인스턴스 재조립 실패가 `package_02`에서 실제로 확인됐다(6절).
+5. 다중 문서 인스턴스 재조립 실패가 `package_02`에서 실제로 확인됐다(6절).
    동일한 마커 구조를 가진 ALTA 커미트먼트 2부와 IRS 트랜스크립트 2건이 각각
    하나의 reconstructed document로 병합됐다. `keep_both_and_flag` 정책 덕분에
    중복 페이지 자체는 삭제되지 않고 보존됐지만, 같은 유형·같은 마커 구조를
    가진 두 인스턴스를 분리하지는 못했다. 개선 방향은 문서 고유 식별자
    추출이며, 이번 범위에서는 구현하지 않았다.
-7. 문서 식별자(`loan_number` 등) 추출이 실패한다. 레이아웃 기반 PDF에서 라벨과
+6. `marker_affinity`는 현재 분류 점수 계산에 사용되지 않는다. `src/rule_classifier.py`의
+   `classify_page`는 strong/weak 시그니처만 점수화하고, 마커는 재조립 구조
+   신호로만 보존한다.
+7. 별도 `--rules` 파일에 대한 `never_strong` 검증은 기본 import 시 검증과 동일하게
+   자동 보장되지 않는다. `src.rule_classifier` import 시 기본 `config/rules.yaml`은
+   검증하지만, CLI의 `--rules` 경로는 `load_rules(args.rules)`로 읽어 그대로
+   pipeline에 전달된다.
+8. 문서 식별자(`loan_number` 등) 추출이 실패한다. 레이아웃 기반 PDF에서 라벨과
    값의 텍스트 스트림상 근접성이 보장되지 않기 때문이다. 개선 방향은 좌표 기반
    추출(`get_text("words")`)이다.
-8. p8처럼 짧고 문맥이 없는 페이지는 룰과 텍스트 LLM 모두 처리하기 어렵다.
-9. 인명 마스킹은 정규식 휴리스틱이라 완전성을 보장하지 못한다.
-10. `NARROW_RULE_MARGIN` 조건은 실데이터에서 한 번도 발동하지 않아 synthetic
-    테스트로만 동작을 확인했다.
-11. 회전 무관 텍스트 추출은 현재 데이터셋에서만 확인된 사실이며 모든 PDF에
+9. p8처럼 짧고 문맥이 없는 페이지는 룰과 텍스트 LLM 모두 처리하기 어렵다.
+10. 인명 마스킹은 정규식 휴리스틱이라 완전성을 보장하지 못한다. 또한 소득
+    서류처럼 금액 구조 자체가 분류 신호인 문서(p36)에서는 무차별 숫자 마스킹이
+    그 신호를 파괴한다는 점도 확인했다.
+11. `NARROW_RULE_MARGIN` 조건은 실데이터에서 발동하지 않았고 synthetic 테스트에서만
+    동작을 확인했다.
+12. `requirements.txt`는 `>=` 최소 버전 위주라 완전한 의존성 재현성을 보장하지
+    않는다.
+13. 회전 무관 텍스트 추출은 현재 데이터셋에서만 확인된 사실이며 모든 PDF에
     일반화할 수 없다.
-12. CI가 구성되어 있지 않다. 원본 PDF를 저장소에 포함하지 않으므로(10절) CI에서
+14. CI가 구성되어 있지 않다. 원본 PDF를 저장소에 포함하지 않으므로(10절) CI에서
     `package_01` 평가를 수행할 수 없고, 지금까지 모든 테스트는 로컬에서만
-    실행했다(102 passed, 0 failed). 개선 방향은 PDF 없이도 동작하는 synthetic
+    실행했다(102 passed, 1 warning). 개선 방향은 PDF 없이도 동작하는 synthetic
     fixture 기반 결정론적 테스트만 CI로 분리하는 것이다.
 
-소득 서류처럼 금액 구조 자체가 분류 신호인 문서(p36)에서는 무차별 숫자
-마스킹이 그 신호를 파괴한다는 점도 확인했다. 실 운영에서는 필드 단위 선택적
-마스킹이나 온프레미스 모델이 필요하다.
+실 운영에서는 필드 단위 선택적 마스킹이나 온프레미스 모델이 필요하다.
