@@ -1,30 +1,29 @@
 # =============================================================================
-# Rule configuration for the mortgage document page classifier.
+# 모기지 서류 페이지 분류기의 룰 설정 파일.
 #
-# Adding a new document type means adding one block under `doc_types` and one
-# entry under `instance_identifiers`. No Python change is required.
+# 새 문서 유형을 추가하려면 `doc_types` 아래에 블록 하나, `instance_identifiers`
+# 아래에 항목 하나만 추가하면 된다. Python 코드 변경은 필요하지 않다.
 #
-# All signals below were verified against package_01. They are development-set
-# signals: they were chosen after inspecting the data, so they do not
-# constitute independent generalization evidence.
+# 아래의 모든 시그널은 package_01 기준으로 검증했다. 데이터를 직접 확인한 뒤
+# 선정한 개발셋 시그널이므로, 그 자체로 일반화 성능의 근거가 되지는 않는다.
 # =============================================================================
 
-version: "1.0.0"
+version: "1.1.0"
 
 # -----------------------------------------------------------------------------
-# Scoring
+# 스코어링
 #
-# rule_score is a heuristic evidence score, not a calibrated probability.
+# rule_score 는 보정된 확률이 아니라 휴리스틱 근거 점수다.
 #
-#   raw[c]    = sum of weights of signals of class c that matched
-#   share[c]  = raw[c] / sum(raw)                      (0 when sum is 0)
-#   mass      = min(1.0, raw[top1] / evidence_saturation)
+#   raw[c]      = 매칭된 클래스 c 시그널들의 가중치 합
+#   share[c]    = raw[c] / sum(raw)                     (합이 0이면 0)
+#   mass        = min(1.0, raw[top1] / evidence_saturation)
 #   rule_score  = share[top1] * mass
 #   rule_margin = share[top1] - share[top2]
 #
-# With the defaults below a single strong signal yields rule_score 1.0, while a
-# single weak signal yields 0.25 and therefore falls under the delegation
-# threshold. That is intentional: one weak keyword should not be enough.
+# 아래 기본값에서 strong 시그널 하나는 rule_score 1.0 을 만들고, weak 시그널
+# 하나는 0.25 에 그쳐 위임 임계값 아래로 떨어진다. 의도된 설계다.
+# weak 키워드 하나만으로 확정해서는 안 된다.
 # -----------------------------------------------------------------------------
 scoring:
   strong_weight: 1.0
@@ -33,30 +32,30 @@ scoring:
   case_sensitive: false
 
 # -----------------------------------------------------------------------------
-# LLM delegation
+# LLM 위임
 #
-# Evaluated in order. A strong signature short-circuits everything else.
-# Values are development heuristics tuned on package_01.
+# 순서대로 평가한다. strong 시그니처가 걸리면 나머지 조건은 건너뛴다.
+# 값은 package_01 에서 조정한 개발용 휴리스틱이다.
 # -----------------------------------------------------------------------------
 delegation:
   strong_signature_short_circuit: true
-  short_text_threshold: 100      # normalized (whitespace-collapsed) length
+  short_text_threshold: 100      # 정규화(공백 축약) 후 문자 길이 기준
   rule_score_threshold: 0.60
   rule_margin_threshold: 0.20
   delegate_on_conflicting_strong_signals: true
   require_multiple_classes_for_margin_check: true
 
 # -----------------------------------------------------------------------------
-# Page markers
+# 페이지 마커
 #
-# Applied in ascending `priority`; the first match wins and later patterns are
-# not attempted. This ordering matters: "Page 7 of 11" also satisfies the
-# generic "N of M" pattern, so PAGE_N_OF_M must be tried first. The resulting
-# `marker_style` is retained because URLA_1003 and CREDIT_REPORT both report a
-# total of 11 in package_01 and the style is what separates them.
+# `priority` 오름차순으로 적용하며, 먼저 매칭된 패턴이 이기고 이후 패턴은
+# 시도하지 않는다. 이 순서가 중요하다. "Page 7 of 11" 은 일반 "N of M" 패턴도
+# 만족시키므로 PAGE_N_OF_M 을 먼저 시도해야 한다. 결과로 얻은 `marker_style`
+# 을 보존하는 이유는, package_01 에서 URLA_1003 과 CREDIT_REPORT 가 둘 다
+# total 11 을 보고하고 이 둘을 가르는 것이 style 이기 때문이다.
 #
-# Markers are structural signals. They feed grouping, and they contribute to
-# classification only in combination with a form-name signal.
+# 마커는 구조 신호다. 그룹핑에 사용되며, 분류에는 서식명 시그널과 결합될
+# 때에만 기여한다.
 # -----------------------------------------------------------------------------
 markers:
   - style: CLTA_PAGE_N
@@ -76,18 +75,18 @@ markers:
     flags: [IGNORECASE]
 
 marker_constraints:
-  max_total: 500          # reject absurd captures from body text
+  max_total: 500          # 본문에서 잘못 잡힌 비현실적인 값을 거른다
   reject_if_page_gt_total: true
 
 # -----------------------------------------------------------------------------
-# Document instance identifiers
+# 문서 인스턴스 식별자
 #
-# Used only in-process to build a run-local surrogate id such as
-# "CREDIT_REPORT#1". Raw values are never persisted.
+# "CREDIT_REPORT#1" 같은 런타임 한정 대체 ID 를 만드는 데에만 사용한다.
+# 원본 값은 저장하지 않는다.
 #
-# Note: in package_01 the loan number appears on both CREDIT_REPORT (14 pages)
-# and URLA_1003 (4 pages). An identifier alone therefore cannot group pages;
-# it is always combined with doc_type, marker_style and marker_total.
+# 참고: package_01 에서 loan number 는 CREDIT_REPORT(14페이지)와
+# URLA_1003(4페이지) 양쪽에 나타난다. 따라서 식별자만으로는 페이지를 묶을 수
+# 없고, 항상 doc_type / marker_style / marker_total 과 함께 사용한다.
 # -----------------------------------------------------------------------------
 instance_identifiers:
   - name: loan_number
@@ -104,12 +103,12 @@ instance_identifiers:
     scope: [URLA_1003]
 
 # -----------------------------------------------------------------------------
-# PII masking applied before any text leaves the process.
+# 텍스트가 프로세스 밖으로 나가기 전에 적용하는 PII 마스킹.
 #
-# The policy separates identifiers from meaning. Monetary amounts, occupation
-# names, form titles and document-type tokens are preserved because they carry
-# the classification signal; the P&L page in package_01 has no standard income
-# keywords and would become unclassifiable if amounts were masked.
+# 정책의 핵심은 식별자와 의미를 분리하는 것이다. 금액, 직업명, 서식 제목,
+# 문서 유형 토큰은 분류 신호를 담고 있으므로 보존한다. package_01 의 P&L
+# 페이지에는 표준적인 소득 키워드가 없어서, 금액까지 마스킹하면 분류 자체가
+# 불가능해진다.
 # -----------------------------------------------------------------------------
 masking:
   preserve_tokens:
@@ -121,8 +120,8 @@ masking:
     - "Net Income"
     - "Sales"
 
-  # Order matters: specific identifier patterns run before the generic
-  # long-digit rule so that formatted amounts are never reached.
+  # 순서가 중요하다. 구체적인 식별자 패턴을 일반 장자리수 규칙보다 먼저
+  # 적용해야 형식이 있는 금액이 그 규칙에 도달하지 않는다.
   patterns:
     - name: ssn
       regex: '\b\d{3}-\d{2}-\d{4}\b'
@@ -146,13 +145,13 @@ masking:
       regex: '(?<![\d.,$])\b\d{8,}\b(?![\d.,])'
       replacement: "[ID]"
 
-  # Amounts must survive masking. Verified against the package_01 P&L page.
+  # 금액은 마스킹을 통과해야 한다. package_01 의 P&L 페이지로 검증했다.
   never_mask_regex:
     - '\$\s?[\d,]+\.?\d*'
     - '\b\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b'
 
-  # Personal names cannot be removed reliably by regex alone. Detected names
-  # are replaced, and the residual risk is documented in the README.
+  # 개인 이름은 정규식만으로 신뢰성 있게 제거할 수 없다. 탐지된 이름은
+  # 치환하며, 남는 위험은 README 에 명시했다.
   name_masking:
     enabled: true
     strategy: "signature_line_heuristic"
@@ -164,14 +163,14 @@ masking:
   max_excerpt_chars: 1200
 
 # -----------------------------------------------------------------------------
-# Document type signals
+# 문서 유형 시그널
 #
-# `strong` fires a single-signal confirmation. Every string below was checked
-# for cross-class collisions across all 39 pages of package_01: zero collisions
-# and zero incorrect single-signal confirmations.
+# `strong` 은 시그널 하나로 확정한다. 아래의 모든 문자열은 package_01 39페이지
+# 전체를 대상으로 클래스 간 충돌을 검사했으며, 충돌 0건 / 잘못된 단일 시그널
+# 확정 0건이었다.
 #
-# `weak` contributes score but never confirms alone. Strings that occur across
-# multiple document types, or that are generic English, belong here.
+# `weak` 는 점수에는 기여하지만 단독으로 확정하지 않는다. 여러 문서 유형에
+# 걸쳐 나타나거나 일반적인 영어 표현인 문자열은 여기에 둔다.
 # -----------------------------------------------------------------------------
 doc_types:
 
@@ -196,6 +195,15 @@ doc_types:
       - "Verification of Employment"
       - "Earnings Statement"
       - "Form 1040"
+      # 위 앵커는 package_01 의 P&L 명세서와 급여·W-2 계열 서식에서 추출한
+      # 것이다. IRS Wage and Income Transcript 와 ICE Income Summary 계열에는
+      # 대응하는 문구가 없어, package_02 에서는 2페이지 문서의 첫 페이지만
+      # strong 매칭되고 연속 페이지와 표지 페이지는 0점이었다.
+      # 아래 7개 문자열이 package_01 텍스트에 존재하지 않음을 먼저 검증한 뒤
+      # 추가했다.
+      - "Wage and Income Transcript"
+      - "Income Summary"
+      - "This Product Contains Sensitive Taxpayer Data"
     weak:
       - "CTEC"
       - "Total Expenses"
@@ -203,10 +211,14 @@ doc_types:
       - "Gross Pay"
       - "Pay Period"
       - "1099"
+      # 위 strong 블록과 동일한 IRS 트랜스크립트 계열 갭에 대한 보조 신호.
+      - "Medicare Wages"
+      - "Social Security Wages"
+      - "Wages, Tips and Other Compensation"
+      - "Employer Identification Number"
     marker_affinity: [NONE]
-    # Known gap: the package_01 P&L page renders its title as an image, so no
-    # strong signal fires and the page is delegated to the LLM. This is the
-    # primary evidence for the hybrid design.
+    # 알려진 갭: package_01 의 P&L 페이지는 제목이 이미지로 렌더링되어 strong
+    # 시그널이 걸리지 않고 LLM 으로 위임된다. 하이브리드 설계의 핵심 근거다.
 
   CREDIT_REPORT:
     strong:
@@ -223,10 +235,9 @@ doc_types:
       - "Manner of Payment"
       - "Trended Data"
     marker_affinity: [PAGE_N_OF_M]
-    # The vendor logo is a raster image, so the brand name is absent from the
-    # text layer on 9 of 18 pages. The repository code "TUC/EXP/EQX" covers
-    # those pages. The vendor street address also covers them but is excluded
-    # as overfitting to this dataset.
+    # 벤더 로고가 래스터 이미지라서 18페이지 중 9페이지에는 브랜드명이 텍스트
+    # 레이어에 없다. 저장소 코드 "TUC/EXP/EQX" 가 그 페이지들을 커버한다.
+    # 벤더 주소도 커버할 수 있지만 이 데이터셋에 대한 과적합이라 제외했다.
 
   TITLE_REPORT:
     strong:
@@ -236,6 +247,17 @@ doc_types:
       - "Title Commitment"
       - "PRELIM NO."
       - "Prelim Number"
+      # 위 앵커는 CLTA 계열(캘리포니아, Fidelity National Title) 전용이다.
+      # package_02 의 ALTA 계열(버지니아, First American Title) 커미트먼트에서는
+      # 어느 페이지에서도 strong 시그널이 걸리지 않아 문서 전체가 미분류로
+      # 떨어졌다.
+      # 아래 9개 문자열이 package_01 텍스트에 존재하지 않음을 먼저 검증한 뒤
+      # 추가했다.
+      - "Commitment for Title Insurance"
+      - "American Land Title Association"
+      - "First American Title"
+      - "Commitment Conditions"
+      - "Chain of Title"
     weak:
       - "EXHIBIT A"
       - "Legal Description"
@@ -243,20 +265,24 @@ doc_types:
       - "Deed of Trust"
       - "END OF EXCEPTIONS"
       - "INFORMATIONAL NOTES"
+      # 위 strong 블록과 동일한 ALTA 계열 갭에 대한 보조 신호.
+      - "Proposed Insured"
+      - "Deed Book"
+      - "Issuing Agent"
+      - "Assessed Value"
     marker_affinity: [CLTA_PAGE_N]
 
   OTHER:
     strong: []
     weak: []
     marker_affinity: []
-    # No positive signals by design. OTHER is assigned when no class reaches
-    # threshold and the LLM either declines or is unavailable. There are zero
-    # OTHER pages in package_01, so this path is unvalidated.
+    # 의도적으로 양성 시그널을 두지 않는다. 어느 클래스도 임계값에 도달하지
+    # 못하고 LLM 이 판단을 거부하거나 사용 불가일 때 OTHER 가 부여된다.
+    # package_01 에는 OTHER 페이지가 0개이므로 이 경로는 미검증 상태다.
 
 # -----------------------------------------------------------------------------
-# Ambiguous strings, listed explicitly so that they are never promoted to
-# `strong` by a later edit. Each occurs in more than one document type or is
-# generic enough to misfire.
+# 모호한 문자열 목록. 이후 편집으로 `strong` 에 승격되는 일이 없도록 명시한다.
+# 각 항목은 둘 이상의 문서 유형에 나타나거나, 오탐을 일으킬 만큼 일반적이다.
 # -----------------------------------------------------------------------------
 never_strong:
   - "Schedule A"
@@ -274,11 +300,10 @@ never_strong:
   - "Borrower"
 
 # -----------------------------------------------------------------------------
-# Logical reconstruction, MVP scope.
+# 논리적 문서 재조립, MVP 범위.
 #
-# Three tiers only. Deeper evidence ladders were considered and dropped: the
-# additional tiers cannot be validated against package_01 and would ship as
-# untested code.
+# 단계는 3개뿐이다. 더 깊은 근거 단계도 검토했으나 채택하지 않았다. 추가
+# 단계는 package_01 로 검증할 수 없어 테스트되지 않은 코드로 배포된다.
 # -----------------------------------------------------------------------------
 reconstruction:
   enabled: true
