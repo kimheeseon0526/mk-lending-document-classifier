@@ -4,9 +4,9 @@ are built inline and fed directly to the grouping functions."""
 from __future__ import annotations
 
 from src.grouping import (
-    _physical_span_and_contiguity,
     build_grouping_key,
     build_physical_groups,
+    physical_span_and_contiguity,
     reconstruct_documents,
 )
 from src.schema import (
@@ -297,17 +297,17 @@ def test_first_page_can_appear_after_last_page() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI display helper: _physical_span_and_contiguity
+# CLI display helper: physical_span_and_contiguity
 # ---------------------------------------------------------------------------
 
 
 def test_physical_span_and_contiguity_for_scattered_pages() -> None:
-    span, is_contiguous = _physical_span_and_contiguity([9, 5, 2])
+    span, is_contiguous = physical_span_and_contiguity([9, 5, 2])
     assert span == "2-9"
     assert is_contiguous is False
 
 
 def test_physical_span_and_contiguity_for_contiguous_pages() -> None:
-    span, is_contiguous = _physical_span_and_contiguity([12, 10, 11])
+    span, is_contiguous = physical_span_and_contiguity([12, 10, 11])
     assert span == "10-12"
     assert is_contiguous is True

@@ -360,7 +360,7 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _physical_span_and_contiguity(physical_pages: list[int]) -> tuple[str, bool]:
+def physical_span_and_contiguity(physical_pages: list[int]) -> tuple[str, bool]:
     """Display-layer helper only: summarize a document's physical footprint.
 
     Does not touch `ReconstructedDocument` in any way -- `start_physical_page`
@@ -427,7 +427,7 @@ def main(argv: list[str] | None = None) -> None:
     rows2 = []
     for d in documents:
         physical_pages = [pl.physical_page for pl in d.page_links]
-        span, is_contiguous = _physical_span_and_contiguity(physical_pages)
+        span, is_contiguous = physical_span_and_contiguity(physical_pages)
         rows2.append(
             [
                 d.doc_id,
