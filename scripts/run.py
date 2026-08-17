@@ -24,6 +24,7 @@ from src.grouping import physical_span_and_contiguity
 from src.llm_classifier import load_llm_config
 from src.pipeline import check_no_pii, run_pipeline
 from src.schema import PageResult, PhysicalGroup, PipelineMode, ReconstructedDocument
+from src.visualize import render_all
 
 
 def _page_results_csv(results: list[PageResult]) -> str:
@@ -174,6 +175,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--rules", default="config/rules.yaml", help="Path to the rules YAML file."
     )
+    parser.add_argument(
+        "--viz",
+        action="store_true",
+        default=False,
+        help="Also render page_strip.png and (if --truth given) confusion_matrix.png.",
+    )
     args = parser.parse_args(argv)
 
     rules = load_rules(args.rules)
@@ -203,6 +210,7 @@ def main(argv: list[str] | None = None) -> None:
     _write(out_dir / "run_report.json", report.model_dump_json(indent=2))
     saved_files.append("run_report.json")
 
+    truth = None
     eval_report = None
     if args.truth:
         truth = load_ground_truth(args.truth)
@@ -218,6 +226,10 @@ def main(argv: list[str] | None = None) -> None:
         eval_text = format_report(eval_report, truth=truth, predictions=result.page_results)
         _write(out_dir / "evaluation.txt", eval_text)
         saved_files.append("evaluation.txt")
+
+    if args.viz:
+        figure_paths = render_all(result.page_results, truth, eval_report, out_dir)
+        saved_files.extend(str(p.relative_to(out_dir)) for p in figure_paths)
 
     print(f"input: {Path(args.pdf).name}")
     print(f"mode: {mode.value}")
