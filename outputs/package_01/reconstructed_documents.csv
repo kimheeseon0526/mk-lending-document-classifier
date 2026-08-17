@@ -1,0 +1,4 @@
+doc_id,doc_type,instance_id,marker_style,expected_pages,observed_logical_pages,missing_logical_pages,duplicate_logical_pages,first_page_at,last_page_at,physical_span,is_contiguous,completeness,issues,logical_to_physical
+RD001,CREDIT_REPORT,,PAGE_N_OF_M,11,1;2;3;4;5;6;7;8;9;10;11,,,9,7,1-39,False,COMPLETE,AMBIGUOUS_ATTACHMENT,1->9;2->31;3->39;4->5;5->33;6->19;7->1;8->15;9->27;10->11;11->7
+RD002,URLA_1003,URLA_1003#1,N_OF_M,11,1;2;3;4;5;6;7;8;9;10;11,,,6,26,2-38,False,COMPLETE,,1->6;2->38;3->10;4->20;5->4;6->14;7->30;8->24;9->35;10->2;11->26
+RD003,TITLE_REPORT,,CLTA_PAGE_N,,1;2;3;4;5;6;7;8,,,32,28,12-37,False,UNKNOWN_EXTENT,AMBIGUOUS_ATTACHMENT,1->32;2->34;3->37;4->12;5->22;6->16;7->18;8->28

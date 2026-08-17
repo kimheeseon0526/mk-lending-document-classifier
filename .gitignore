@@ -10,7 +10,12 @@ data/**
 # Generated artifacts
 outputs/**
 !outputs/
+!outputs/**/
 !outputs/.gitkeep
+!outputs/**/*.csv
+!outputs/**/*.json
+!outputs/**/*.txt
+!outputs/**/*.png
 
 # Python
 __pycache__/
@@ -18,3 +23,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# Internal working notes, not part of the deliverable
+verified_facts.md

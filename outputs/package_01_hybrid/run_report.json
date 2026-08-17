@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0.0",
+  "mode": "hybrid",
+  "source_pdf_name": "01.990145627_shuffled.pdf",
+  "total_pages": 39,
+  "rule_resolved": 39,
+  "llm_target_pages": [
+    8,
+    36
+  ],
+  "llm_called": 0,
+  "llm_resolved": 0,
+  "rule_fallback_count": 0,
+  "llm_parse_failures": 0,
+  "llm_call_records": [],
+  "empty_text_pages": [],
+  "orphan_pages": [
+    3,
+    8,
+    13,
+    17,
+    21,
+    23,
+    25,
+    29,
+    36
+  ],
+  "llm_config": {
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "temperature": 0.0,
+    "timeout_seconds": 30,
+    "max_retries": 2,
+    "batch_size": 10,
+    "max_excerpt_chars": 1200,
+    "prompt_version": "v1",
+    "enabled": false
+  },
+  "rules_version": "1.0.0",
+  "warnings": [
+    "LLM_DISABLED"
+  ]
+}
