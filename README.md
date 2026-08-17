@@ -5,12 +5,16 @@
 
 ## 1. 개요
 
-대출 서류 패키지는 스캔·병합 과정에서 페이지 순서가 섞이는 경우가 있다. 이
-프로젝트는 섞인 PDF 한 개를 입력으로 받아, 물리 페이지마다 5개 라벨 중 하나를
-예측하고, 페이지 마커와 문서 식별자를 근거로 원본 문서 단위를 재구성한다.
-룰 기반 분류를 1차로 사용하고, 룰이 확신하지 못하는 페이지만 LLM에 위임하는
-하이브리드 구조를 채택했다 — 근거는 3절 참고. `data/package_01`을 대상으로
-룰 전용(rule-only) 모드를 실행했을 때 accuracy 0.9744(38/39)를 확인했다.
+MK Lending Corp의 중장기 목표는 자체 AUS(Automated Underwriting System)
+구축이다. AUS가 서류를 근거로 판정하려면 정확한 데이터 추출이 선행돼야 하는데,
+실무 대출 패키지는 수십~수백 페이지가 순서 없이 하나로 합쳐진 PDF로 들어오기
+때문에 그 전에 "이 페이지가 무슨 서류의 몇 번째 장인가"부터 판별하는 문서
+분류·분할 단계가 필요하다. 이 프로젝트는 그 단계를 구현한다: 셔플된 PDF 한
+개를 입력으로 받아 물리 페이지마다 5개 라벨 중 하나를 예측하고, 페이지 마커와
+문서 식별자를 근거로 원본 문서 단위를 재구성한다. 룰 기반 분류를 1차로
+사용하고, 룰이 확신하지 못하는 페이지만 LLM에 위임하는 하이브리드 구조를
+채택했다 — 근거는 3절 참고. `data/package_01`을 대상으로 룰 전용(rule-only)
+모드를 실행했을 때 accuracy 0.9744(38/39)를 확인했다.
 
 ## 2. 문서 유형
 
@@ -27,17 +31,17 @@
 ## 3. 아키텍처
 
 ```
-extract.py          PyMuPDF로 페이지 텍스트·회전·마커·식별자 추출
-      │
-rule_classifier.py  키워드 시그니처 스코어링, 위임(should_delegate) 판정
-      │
-llm_classifier.py   (위임된 페이지만) PII 마스킹 → 프롬프트 구성 → 배치 →
-                     응답 검증 → 재시도/Fallback
-      │
-grouping.py          물리적 연속 그룹핑(필수) + 논리 문서 재조립(확장)
-      │
+extract.py            PyMuPDF로 페이지 텍스트·회전·마커·식별자 추출
+  │
+rule_classifier.py    키워드 시그니처 스코어링, 위임(should_delegate) 판정
+  │
+llm_classifier.py     (위임된 페이지만) PII 마스킹 → 프롬프트 구성 → 배치 →
+                      응답 검증 → 재시도/Fallback
+  │
+grouping.py           물리적 연속 그룹핑(필수) + 논리 문서 재조립(확장)
+  │
 evaluate.py           정답지 대조 (--truth 제공 시)
-visualize.py           페이지 스트립·confusion matrix 이미지 (--viz 제공 시)
+visualize.py          페이지 스트립·confusion matrix 이미지 (--viz 제공 시)
 ```
 
 `pipeline.py`가 위 단계를 순서대로 호출하고 `scripts/run.py`가 CLI 진입점이다.
@@ -169,10 +173,12 @@ OTHER                  0      0       0       0      0
 경우가 38쌍 중 0쌍이기 때문이다. 병합하거나 보정하지 않고 실제 구조 그대로
 출력한다.
 
-**논리 문서 재조립**은 확장 기능이다. `doc_type` + `instance_id` + `marker_style`
-+ `marker_total` 네 요소를 조합한 키로, 식별자와 마커가 모두 있으면 확정 결합
+**논리 문서 재조립**은 확장 기능이다. `doc_type`, `instance_id`, `marker_style`,
+`marker_total` 네 요소를 조합한 키로, 식별자와 마커가 모두 있으면 확정 결합
 (tier 1), 식별자 없이 마커만 일치하면 결합하되 `AMBIGUOUS_ATTACHMENT`로 표시
-(tier 2), 증거가 부족하면 결합하지 않고 orphan으로 남긴다(tier 3).
+(tier 2), 증거가 부족하면 결합하지 않고 orphan으로 남긴다(tier 3). 네 요소가
+모두 필요한 이유: URLA_1003과 CREDIT_REPORT는 `package_01`에서 marker_total이
+모두 11이므로, marker_style이 이 둘을 실제로 구분하는 요소가 된다.
 
 실측 결과 3개 문서로 재조립됐다:
 
