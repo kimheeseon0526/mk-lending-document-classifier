@@ -55,8 +55,10 @@ LLM에 보내는 방식은 실행마다 결과가 달라질 위험과 비용·�
 ## 4. 실행 방법
 
 **환경**: Python 3.11 이상 (3.11.5에서 검증), 의존성은 `requirements.txt`. `.env.example`을 `.env`로
-복사하고 `LLM_API_KEY`를 채우면 `hybrid` 모드가 활성화된다(키가 없으면 자동으로
-rule-only와 동일하게 동작한다).
+복사하고 `LLM_API_KEY`를 채우면 `LLMRuntimeConfig.enabled`가 `True`로 바뀐다.
+다만 실제 네트워크 호출부(`call_llm`)가 미구현이라 키를 채워도 실제 LLM 추론은
+수행되지 않는다(자세한 동작은 9절 참고). 키가 없으면 `hybrid` 모드가
+`LLM_DISABLED`로 rule-only와 동일하게 자동 강등된다.
 
 **주의**: 원본 파일명에 공백과 `&`가 포함되므로 모든 경로 인자를 따옴표로
 감싸야 한다.
@@ -165,8 +167,11 @@ OTHER                  0      0       0       0      0
 
 ### package_02 (990367284_shuffled)
 
-정답지가 제공되지 않은 패키지다. **accuracy는 측정할 수 없으므로 보고하지 않는다.**
-아래는 예측 결과의 분포와 파이프라인이 스스로 보고한 지표다.
+package_02는 정답지가 없는 추가 입력으로 사용했으며, 최초 실행에서 발견된 서식
+커버리지 갭을 분석해 룰을 확장했다(아래 참고). 따라서 package_02는 독립
+검증셋이나 일반화 성능의 근거로 사용하지 않는다. **accuracy는 측정할 수 없으므로
+보고하지 않는다.** 아래 수치는 정확도가 아니라 예측 라벨 분포, 위임 대상 수,
+빈 텍스트 페이지 수 및 재조립 상태를 나타낸다.
 
 | 항목 | 값 |
 |---|---|
@@ -188,8 +193,11 @@ OTHER                  0      0       0       0      0
 #### 발견한 문제와 조치: 서식 계열 커버리지 갭
 
 package_01에만 맞춰진 시그니처의 한계가 드러났다. 최초 실행(rules 1.0.0)에서
-TITLE_REPORT는 11페이지 중 4페이지만 분류됐고, 44페이지 중 18페이지(41%)가
-LLM 위임 대상으로 올라갔다. package_01의 위임률은 5%(2/39)였다.
+TITLE_REPORT 예측 수는 4페이지였고, 44페이지 중 18페이지(41%)가 LLM 위임
+대상으로 올라갔다. package_01의 위임률은 5%(2/39)였다. package_02에는
+정답지가 없으므로 이 4페이지 중 몇 페이지가 실제로 맞았는지는 알 수 없다 —
+위임률이 package_01 대비 비정상적으로 높다는 점과 strong 시그니처 매칭이
+0건이라는 사실을 근거로 서식 커버리지 갭을 판단했다.
 
 원인은 서식 계열 차이였다. package_01의 표제보험 서류는 CLTA 계열(캘리포니아,
 Fidelity National Title)이고 package_02는 ALTA 계열(버지니아, First American
@@ -198,13 +206,16 @@ Title)이다. 기존 strong 앵커 6개는 모두 CLTA 전용 문구였고, ALTA
 IRS Wage & Income Transcript 계열에 대응하는 문구가 없었다.
 
 조치로 rules.yaml에 ALTA 계열 9개, IRS 계열 7개 시그니처를 추가했다
-(rules_version 1.1.0). 추가 전에 해당 16개 문자열이 package_01 텍스트에
-존재하지 않음을 검증해 회귀 위험이 없음을 확인했고, 적용 후 package_01의
-accuracy 0.9744와 macro-F1 0.9853, 위임 페이지 2건이 모두 그대로 유지되는
-것을 실측했다.
+(rules_version 1.1.0). 추가한 16개 문자열이 package_01의 추출 텍스트에서
+매칭되지 않음을 적용 전에 사전 확인했다. 적용 후 package_01을 다시 실행한
+결과 accuracy 0.9744(38/39), macro_f1_supported 0.9853, LLM 위임 대상 2건,
+orphan 9건이 기존과 동일하게 유지됐다. 이는 package_01에서 관찰된 회귀가
+없다는 의미이며, 다른 문서 계열에 대한 일반화 성능을 보장하지 않는다.
 
-결과적으로 TITLE_REPORT는 4 → 11페이지, INCOME_DOC은 2 → 5페이지로 회복됐고
-위임 대상은 18 → 4페이지로 줄었다.
+결과적으로 TITLE_REPORT 예측 수는 4 → 11, INCOME_DOC 예측 수는 2 → 5로
+변경됐고, 위임 대상은 18 → 4로 줄었다. 수동 서식 검토에서 ALTA/IRS 계열의
+사전 커버리지 부족이 확인됐다. 정답지가 없으므로 이 변화가 정답률 향상을
+의미하지는 않는다 — 예측 라벨 분포가 바뀌었다는 사실만 확인 가능하다.
 
 #### 발견한 문제: 중복 수록 문서의 인스턴스 분리 실패
 
@@ -228,9 +239,13 @@ IRS 트랜스크립트 2건(2024년, 2025년)이다.
 #### 남은 한계
 
 - **텍스트 레이어가 없는 3페이지(p11, p26, p40)**: ALTA Commitment Conditions
-  2·3·4 of 4 페이지로, 정규화 후 문자 수가 0이다. 텍스트 기반 룰로는 원리상
-  분류할 수 없어 SHORT_TEXT 조건으로 LLM에 위임됐고, API 키가 없어 실제
-  호출은 발생하지 않았다. OCR 스테이지는 구현하지 않았다.
+  2·3·4 of 4 페이지로, 정규화 후 문자 수가 0이다. `package_01`은 39페이지
+  전부 텍스트 레이어가 있었지만, 이 결과를 "전체 데이터셋에서 OCR이
+  불필요하다"로 일반화할 수 없다는 것이 package_02에서 드러났다. 텍스트
+  기반 룰로는 원리상 분류할 수 없어 SHORT_TEXT 조건으로 LLM에 위임됐지만,
+  애초에 보낼 텍스트가 없으므로 텍스트 전용 LLM을 연결해도 이 3페이지는
+  해결되지 않는다(API 키도 없어 실제 호출은 발생하지 않았다). OCR 또는
+  Vision 기반 처리가 필요하지만 이번 제출 범위에서는 구현하지 않았다.
 - **분류 경계가 모호한 1페이지(p32)**: Experian Employment Verification 보고서로,
   신용조회기관 발행물이지만 신용보고서 본체는 아니다. 5개 라벨 정의만으로는
   단정할 수 없어 위임 대상으로 남겼다.
@@ -314,13 +329,29 @@ RD003 TITLE_REPORT:  1->32, 2->34, 3->37, 4->12, 5->22, 6->16, 7->18, 8->28
 ## 9. AI 사용
 
 **런타임 분류**: `llm_classifier.py`는 설정 로딩, PII 마스킹, 프롬프트 구성,
-배치 분할, 응답 검증, 재시도/fallback 오케스트레이션까지 구현하고 테스트했다.
-provider `openai`, model `gpt-5-mini`, temperature 0, Structured Outputs로
-`LLMBatchResponse` 스키마를 강제하도록 설계했다. **실제 OpenAI 네트워크 호출부
-(`call_llm`)는 미구현 상태이며 `NotImplementedError`를 던진다.** API 키가 없는
-환경에서는 파이프라인 전체가 rule-only와 동일하게 자동 강등되어 예외 없이
-완주한다(`hybrid` 모드 실행 시 `mode`는 `hybrid`로 유지되고
-`warnings: ["LLM_DISABLED"]`가 기록된다). 측정된 실제 LLM 판정 성능은 없다.
+배치 분할, 응답 검증, 재시도/fallback 오케스트레이션까지 구현하고 `call_llm`을
+monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
+`gpt-5-mini`, temperature 0, Structured Outputs로 `LLMBatchResponse` 스키마를
+강제하도록 설계했다. **실제 OpenAI 네트워크 호출부(`call_llm`)는 미구현
+상태이며 항상 `NotImplementedError`를 던진다.**
+
+- **API 키 없음**: `LLMRuntimeConfig.enabled=False`가 되어 `hybrid` 모드가
+  `LLM_DISABLED` 경고와 함께 rule-only와 동일하게 자동 강등된다. 예외 없이
+  완주하며 `run_report.json`의 `mode`는 `hybrid`로 유지된다.
+- **API 키 있음**: `enabled=True`가 되지만 `call_llm`이 미구현이므로 실제
+  네트워크 추론은 수행되지 않는다. 매 시도가 `NotImplementedError`로 실패해
+  재시도(`max_retries`)를 소진한 뒤 `decision_source=RULE_FALLBACK`,
+  `warnings: ["LLM_CALL_FAILED"]`로 처리되고 최종 라벨은 룰 결과를 유지한다.
+- **테스트된 범위**: PII 마스킹, 요청/프롬프트 구성, 배치 분할, 응답 검증(잘못된
+  라벨 처리, 응답 개수 불일치 포함), 재시도, rule fallback.
+- **테스트되지 않은 범위**: `gpt-5-mini` 모델명의 실제 유효성, 실제 OpenAI API
+  스펙, 실제 Structured Outputs 호출, 실제 모델의 정확도·지연시간·비용. 측정된
+  실제 LLM 판정 성능은 없다.
+
+`outputs/package_01_hybrid`는 이 자동 강등을 확인한 산출물이다 — 실제 LLM
+추론 결과가 아니라, LLM이 비활성화된 상태(`llm_config.enabled: false`)에서
+`hybrid` 모드가 `LLM_DISABLED` 경고를 남기고 rule-only와 동일한 라벨로
+완주하는지 확인한 결과다(`outputs/package_01_hybrid/run_report.json`).
 
 **개발 보조**: 이 코드베이스는 Claude Code와 Codex를 사용해 작성했다.
 `src/schema.py`와 `config/rules.yaml`을 인터페이스 계약으로 고정하고
@@ -371,10 +402,17 @@ provider `openai`, model `gpt-5-mini`, temperature 0, Structured Outputs로
    fallback은 테스트로 검증했지만 `gpt-5-mini` 모델 문자열과 Structured
    Outputs API 스펙을 실제 호출로 확인하지 않았고, 실제 모델 판정 성능도
    측정하지 못했다.
-5. OCR fallback이 없다. 현재 데이터셋은 텍스트 레이어가 있어 불필요했지만
-   image-only PDF는 처리할 수 없다.
-6. 다중 문서 인스턴스 재조립이 검증되지 않았다. 같은 유형 문서가 2개 이상이고
-   총 장수가 같으면 한 문서로 병합될 수 있다.
+5. OCR fallback이 없다. `package_01` 39페이지는 전부 텍스트 레이어가 있었지만,
+   `package_02`의 p11/p26/p40은 정규화 텍스트 길이가 0이다(6절). 따라서
+   "이 데이터셋은 OCR이 불필요하다"는 결론을 전체 패키지로 일반화할 수 없다.
+   텍스트가 없는 페이지는 텍스트 전용 LLM을 연결해도 해결되지 않는다. OCR
+   또는 Vision 기반 처리가 필요하지만 이번 제출 범위에서는 구현하지 않았다.
+6. 다중 문서 인스턴스 재조립 실패가 `package_02`에서 실제로 확인됐다(6절).
+   동일한 마커 구조를 가진 ALTA 커미트먼트 2부와 IRS 트랜스크립트 2건이 각각
+   하나의 reconstructed document로 병합됐다. `keep_both_and_flag` 정책 덕분에
+   중복 페이지 자체는 삭제되지 않고 보존됐지만, 같은 유형·같은 마커 구조를
+   가진 두 인스턴스를 분리하지는 못했다. 개선 방향은 문서 고유 식별자
+   추출이며, 이번 범위에서는 구현하지 않았다.
 7. 문서 식별자(`loan_number` 등) 추출이 실패한다. 레이아웃 기반 PDF에서 라벨과
    값의 텍스트 스트림상 근접성이 보장되지 않기 때문이다. 개선 방향은 좌표 기반
    추출(`get_text("words")`)이다.
@@ -382,15 +420,9 @@ provider `openai`, model `gpt-5-mini`, temperature 0, Structured Outputs로
 9. 인명 마스킹은 정규식 휴리스틱이라 완전성을 보장하지 못한다.
 10. `NARROW_RULE_MARGIN` 조건은 실데이터에서 한 번도 발동하지 않아 synthetic
     테스트로만 동작을 확인했다.
-11. `package_02`는 현재 파일을 받지 못했다. 과제는 `package_02` 분류 결과 제출을
-    요구하지만, 이 PDF는 아직 제공되지 않아 실행하지 못했다. 파이프라인은 입력
-    경로를 CLI 인자로 받고 파일명·페이지 수·셔플 전략을 하드코딩하지 않았으므로
-    파일을 받으면 동일한 명령으로 즉시 실행할 수 있다. 다만 `package_02`는
-    정답지가 없어 accuracy를 측정할 수 없고, 예측 라벨 분포와 저신뢰 위임 페이지
-    수만 보고할 수 있다. 이 수치들을 임의로 생성해 제시하지 않았다.
-12. 회전 무관 텍스트 추출은 현재 데이터셋에서만 확인된 사실이며 모든 PDF에
+11. 회전 무관 텍스트 추출은 현재 데이터셋에서만 확인된 사실이며 모든 PDF에
     일반화할 수 없다.
-13. CI가 구성되어 있지 않다. 원본 PDF를 저장소에 포함하지 않으므로(10절) CI에서
+12. CI가 구성되어 있지 않다. 원본 PDF를 저장소에 포함하지 않으므로(10절) CI에서
     `package_01` 평가를 수행할 수 없고, 지금까지 모든 테스트는 로컬에서만
     실행했다(102 passed, 0 failed). 개선 방향은 PDF 없이도 동작하는 synthetic
     fixture 기반 결정론적 테스트만 CI로 분리하는 것이다.

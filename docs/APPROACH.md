@@ -2,7 +2,14 @@
 
 주요 기술적 의사결정과 검토했으나 채택하지 않은 대안을 기록한다. `README.md`의
 아키텍처·평가 절 요약을 전제로, 여기서는 각 결정의 배경·대안·근거·한계를
-`verified_facts.md`에 기록된 실측값과 함께 상세히 다룬다.
+실측값과 함께 상세히 다룬다. 검증 근거는 `outputs/package_01/evaluation.json`,
+`outputs/package_01/run_report.json`, `outputs/package_02/run_report.json`,
+`docs/ERROR_ANALYSIS.md`에 있다.
+
+아래 결정 대부분은 `package_01` 데이터만으로 내려졌다. `package_02`는
+정답지가 없어 독립 검증셋이 아니라 룰 적응(서식 커버리지 확장)에 사용한
+추가 입력이며(README 6절), `package_02`에서 새로 확인된 한계는 각 결정의
+Limitation에 별도로 표기했다.
 
 ## Decision: 룰 우선 + 저신뢰 페이지만 LLM 위임
 
@@ -29,7 +36,11 @@ True인 페이지만 LLM에 위임하는 하이브리드 구조를 채택했다.
 
 ### Limitation
 실제 LLM 호출부(`call_llm`)가 미구현이라, 위임된 2장에 대한 실제 모델 판정
-성능은 측정되지 않았다.
+성능은 측정되지 않았다. 또한 이 위임 경로는 텍스트 기반이므로 정규화 텍스트
+길이가 0인 페이지에는 원리상 통하지 않는다 — `package_02`의 p11/p26/p40이
+이 경우로, 텍스트 전용 LLM에 위임해도 보낼 텍스트 자체가 없어 해결되지
+않는다(package_02에서 확인됨, README 6·12절). OCR/Vision 기반 처리가
+필요하지만 구현하지 않았다.
 
 ---
 
@@ -83,9 +94,15 @@ True인 페이지만 LLM에 위임하는 하이브리드 구조를 채택했다.
 (`CREDIT_REPORT`)과 "N of M"(`URLA_1003`)을 실제로 구분하는 요소다.
 
 ### Limitation
-같은 4요소 조합을 가진 서로 다른 문서 인스턴스가 2개 이상 존재하는 경우는
-검증되지 않았다. `package_01`은 유형별 문서가 1개씩이라 이 시나리오 자체가
-데이터에 없다.
+같은 4요소 조합을 가진 서로 다른 문서 인스턴스가 2개 이상 존재하는 경우,
+`package_01`은 유형별 문서가 1개씩이라 이 시나리오 자체가 없어 원래
+검증되지 않았다. `package_02`에서 실제로 이 경우가 발생했다 — 동일한 마커
+구조를 가진 ALTA 커미트먼트 2부와 IRS 트랜스크립트 2건이 각각 하나의
+reconstructed document로 병합됐다(package_02에서 확인됨, README 6절).
+`keep_both_and_flag` 정책 덕분에 중복 페이지 자체는 삭제되지 않고
+보존됐지만, 현재 `GroupingKey`로는 두 인스턴스를 분리할 근거가 없다는
+한계가 실측으로 확인됐다. 분리하려면 문서 고유 식별자 추출이 선행돼야
+한다.
 
 ---
 
@@ -246,10 +263,11 @@ fallback 오케스트레이션까지 전부 구현하고 테스트하되, 실제
 API 키가 없으면(`llm enabled: False`) 파이프라인 전체가 rule-only와 동일하게
 자동 강등되어 예외 없이 완주한다 — `hybrid` 모드로 실행해도 `run_report.json`에
 `mode: "hybrid"`가 유지되고 `warnings: ["LLM_DISABLED"]`가 기록된다. 요청받은
-모드를 몰래 rule-only로 바꾸지 않으므로, 키를 넣고 재실행하면 동일한 위임
-대상(p8, p36)에 대해 비교할 수 있다. 검증된 실패 경로: 응답 개수 불일치
-(`LLM_COUNT_MISMATCH`), 허용되지 않은 라벨/범위 밖 confidence(항목 제외), 재시도
-소진 후 `RULE_FALLBACK`(doc_type은 룰 결과 유지).
+모드를 몰래 rule-only로 바꾸지 않는다. API 키를 넣어도 `call_llm`이
+미구현이므로 실제 비교는 아직 불가능하다 — 매 시도가 `NotImplementedError`로
+실패해 재시도 소진 후 `RULE_FALLBACK`으로 처리된다. 검증된 실패 경로: 응답
+개수 불일치(`LLM_COUNT_MISMATCH`), 허용되지 않은 라벨/범위 밖 confidence(항목
+제외), 재시도 소진 후 `RULE_FALLBACK`(doc_type은 룰 결과 유지).
 
 ### Limitation
 `gpt-5-mini` 모델 문자열과 Structured Outputs API 스펙을 실제 호출로
