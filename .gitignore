@@ -26,3 +26,6 @@ venv/
 
 # Internal working notes, not part of the deliverable
 verified_facts.md
+
+# handoff.md를 프로젝트 루트에 저장 후
+handoff.md
