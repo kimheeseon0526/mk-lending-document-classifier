@@ -1,45 +1,57 @@
 {
   "schema_version": "1.0.0",
   "mode": "hybrid",
-  "source_pdf_name": "01.990145627_shuffled.pdf",
-  "total_pages": 39,
-  "rule_resolved": 37,
+  "source_pdf_name": "02.990367284_shuffled.pdf",
+  "total_pages": 44,
+  "rule_resolved": 40,
   "llm_target_pages": [
-    8,
-    36
+    11,
+    26,
+    32,
+    40
   ],
-  "llm_called": 2,
-  "llm_resolved": 2,
+  "llm_called": 4,
+  "llm_resolved": 4,
   "rule_fallback_count": 0,
   "llm_parse_failures": 0,
   "llm_call_records": [
     {
       "batch_index": 0,
       "requested_page_ids": [
-        8,
-        36
+        11,
+        26,
+        32,
+        40
       ],
       "returned_page_ids": [
-        8,
-        36
+        11,
+        26,
+        32,
+        40
       ],
       "attempt_count": 1,
       "succeeded": true,
       "warnings": [],
-      "latency_ms": 4609
+      "latency_ms": 3095
     }
   ],
-  "empty_text_pages": [],
+  "empty_text_pages": [
+    11,
+    26,
+    40
+  ],
   "orphan_pages": [
-    3,
-    8,
-    13,
-    17,
-    21,
-    23,
-    25,
-    29,
-    36
+    2,
+    4,
+    11,
+    14,
+    19,
+    24,
+    26,
+    30,
+    32,
+    36,
+    40
   ],
   "llm_config": {
     "provider": "openai",

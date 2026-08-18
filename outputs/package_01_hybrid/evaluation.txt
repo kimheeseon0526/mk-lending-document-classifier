@@ -2,14 +2,14 @@ mode: hybrid
 dataset: ground_truth_package_01.csv
 total_pages: 39
 accuracy: 0.9744
-macro_f1_supported: 0.9853
+macro_f1_supported: 1.0000
 
 per-class metrics:
 doc_type       support  predicted  precision  recall  f1    
 URLA_1003      11       11         1.0000     1.0000  1.0000
-INCOME_DOC     1        1          1.0000     1.0000  1.0000
+INCOME_DOC     1        0          N/A        0.0000  N/A   
 CREDIT_REPORT  18       18         1.0000     1.0000  1.0000
-TITLE_REPORT   9        8          1.0000     0.8889  0.9412
+TITLE_REPORT   9        9          1.0000     1.0000  1.0000
 OTHER          0        1          0.0000     N/A     N/A   
 
 Note: OTHER has support 0 in this dataset. recall/f1 are undefined (N/A), not 0.0, and excluded from macro_f1_supported.
@@ -17,11 +17,11 @@ Note: OTHER has support 0 in this dataset. recall/f1 are undefined (N/A), not 0.
 confusion matrix (rows=actual, cols=predicted):
 actual\predicted  URLA_1003  INCOME_DOC  CREDIT_REPORT  TITLE_REPORT  OTHER
 URLA_1003         11         0           0              0             0    
-INCOME_DOC        0          1           0              0             0    
+INCOME_DOC        0          0           0              0             1    
 CREDIT_REPORT     0          0           18             0             0    
-TITLE_REPORT      0          0           0              8             1    
+TITLE_REPORT      0          0           0              9             0    
 OTHER             0          0           0              0             0    
 
 misclassified pages (1):
-page  actual        predicted
-8     TITLE_REPORT  OTHER    
+page  actual      predicted
+36    INCOME_DOC  OTHER    

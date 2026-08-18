@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+from openai import OpenAI
 from pydantic import ValidationError
 
 from src.extract import extract_pages, load_rules
@@ -344,23 +345,64 @@ def response_json_schema() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The network call -- not implemented yet
+# The network call
 # ---------------------------------------------------------------------------
 
 
 def call_llm(batch: list[LLMPageRequest], config: LLMRuntimeConfig) -> LLMBatchResponse:
     """Call the LLM provider and return its structured decision for `batch`.
 
-    Not implemented yet. This is the one function reserved for the real
-    OpenAI Structured Outputs call (using `build_prompt` for the messages
-    and `response_json_schema()` for the schema); everything else in this
-    module is already complete and tested against a monkeypatched stand-in
-    for this function.
+    Uses the OpenAI SDK's `chat.completions.parse` with
+    `response_format=LLMBatchResponse` so the SDK enforces Structured
+    Outputs against the schema and hands back an already-validated
+    `LLMBatchResponse` (or `None` on a refusal/schema mismatch, handled
+    below). `build_prompt` supplies the system/user messages; the
+    `response_json_schema()` helper is not needed here since passing the
+    pydantic model class directly lets the SDK derive and enforce the same
+    schema itself.
+
+    `LLMRuntimeConfig` deliberately has no `api_key` (or `base_url`) field
+    (see its docstring), so both are read the same way `load_llm_config`
+    reads its own settings -- via env vars through `load_dotenv` -- rather
+    than being threaded through `config`. Neither is stored anywhere beyond
+    constructing the client for this one call.
+
+    `LLM_BASE_URL` lets `LLM_API_KEY` point at any OpenAI-compatible
+    endpoint (e.g. Gemini's `https://generativelanguage.googleapis.com/v1beta/openai/`)
+    instead of api.openai.com. Unset/empty means the SDK's real OpenAI
+    default is used, unchanged from before.
+
+    Raises on any failure -- missing key, auth, timeout, rate limit,
+    refusal, schema mismatch -- and never retries; `resolve_delegated_pages`
+    owns the retry loop and rule-fallback path.
     """
-    raise NotImplementedError(
-        "OpenAI Structured Outputs call is not implemented yet. "
-        "Run with rule-only mode, or implement this function."
+    load_dotenv(override=False)
+    api_key = os.environ.get("LLM_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("LLM_API_KEY is not set; cannot call the LLM provider.")
+
+    base_url = os.getenv("LLM_BASE_URL") or None
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+    system_prompt, user_prompt = build_prompt(batch)
+
+    completion = client.chat.completions.parse(
+        model=config.model,
+        temperature=config.temperature,
+        timeout=config.timeout_seconds,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format=LLMBatchResponse,
     )
+
+    message = completion.choices[0].message
+    if message.refusal is not None:
+        raise RuntimeError(f"LLM refused the request: {message.refusal}")
+    if message.parsed is None:
+        raise ValueError("LLM response did not parse against the LLMBatchResponse schema.")
+
+    return message.parsed
 
 
 # ---------------------------------------------------------------------------
