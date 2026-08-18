@@ -3,23 +3,25 @@
 셔플된 모기지 대출 서류 패키지 PDF의 각 페이지를 5종 문서 유형으로 분류하고,
 물리적으로 연속된 페이지 그룹과 논리적으로 이어지는 원본 문서를 재구성한다.
 룰 기반 1차 분류에 저신뢰 페이지만 선택적으로 LLM에 위임하는 하이브리드
-구조를 사용한다.
+구조를 사용하며, LLM 위임 경로는 실제 네트워크 호출까지 구현해 두 패키지
+모두에서 실행을 확인했다.
 
 ## 핵심 결과
 
 | 항목 | 결과 |
 |---|---|
-| 분류 방식 | 룰 기반 1차 분류 + 저신뢰 페이지 선택적 LLM 위임 |
+| 분류 방식 | 룰 기반 1차 분류 + 저신뢰 페이지 선택적 LLM 위임 (실제 호출 구현) |
 | 출력 | 페이지별 5종 문서 유형 + 물리 그룹 + 논리 문서 재조립 |
-| package_01 | rule-only accuracy **0.9744 (38/39)**, macro_f1_supported **0.9853**\* |
-| package_02 | 정답지 부재로 예측 분포와 실행 지표만 보고 |
+| package_01 | rule-only accuracy **0.9744 (38/39)**, macro_f1_supported **0.9853**\* / hybrid accuracy **0.9744 (38/39)**, macro_f1_supported **1.0000**\* |
+| package_02 | 정답지 부재로 예측 분포와 실행 지표만 보고 (rule-only·hybrid 모두) |
 | 테스트 | **102 passed, 1 warning**, 원본 PDF 없이 핵심 로직 재현 가능 |
-| LLM 구현 범위 | 위임 판단·프롬프트·응답 검증·mock 테스트 구현, 외부 API 호출 어댑터 미구현 |
+| LLM 구현 범위 | 위임 판단·프롬프트·응답 검증·재시도/fallback·실제 네트워크 호출까지 구현. 제출 시점 실행은 Gemini의 OpenAI 호환 엔드포인트(`gemini-2.5-flash`) 사용, 실제 OpenAI 엔드포인트로는 호출하지 않음 |
 
-> \* package_01의 `macro_f1_supported` 는 **실측값** 입니다. support가 1 이상인
-> 클래스만 평균한 프로젝트 정의 지표이며, 고정 5클래스 macro-F1과 다릅니다.
-> 평가 기준과 클래스별 상세 결과는 [평가 방법 및 결과](#6-평가-방법-및-결과)를
-> 참고하세요.
+> \* package_01의 `macro_f1_supported`는 support가 1 이상인 클래스 중 F1이
+> 정의되는 클래스만 평균한 프로젝트 정의 지표이며, 고정 5클래스 macro-F1과
+> 다르다. hybrid의 1.0000은 성능 향상이 아니라 `INCOME_DOC`이 한 건도 예측되지
+> 않아 F1이 정의되지 않고 평균에서 제외된 결과다. 상세는
+> [평가 방법 및 결과](#6-평가-방법-및-결과) 참고.
 
 ## 목차
 
@@ -47,7 +49,8 @@ MK Lending Corp의 중장기 목표는 자체 AUS(Automated Underwriting System)
 문서 식별자를 근거로 원본 문서 단위를 재구성한다. 룰 기반 분류를 1차로
 사용하고, 룰이 확신하지 못하는 페이지만 LLM에 위임하는 하이브리드 구조를
 채택했다 — 근거는 3절 참고. `data/package_01`을 대상으로 룰 전용(rule-only)
-모드를 실행했을 때 accuracy 0.9744(38/39)를 확인했다.
+모드를 실행했을 때 accuracy 0.9744(38/39)를 확인했고, 위임된 페이지에 실제
+LLM을 호출하는 hybrid 모드로도 동일 데이터를 실행해 결과를 비교했다(6·9절).
 
 ## 2. 문서 유형
 
@@ -85,7 +88,7 @@ visualize.py          페이지 스트립·confusion matrix 이미지 (--viz 제
 |---|---|---|
 | Python 3.11 | PDF·데이터 처리 라이브러리가 풍부하고 파이프라인 구현을 빠르게 반복할 수 있다. | 패키징과 의존성 재현성은 별도 관리가 필요하다. |
 | PyMuPDF | 페이지 단위 텍스트, 회전값, 이미지 수를 한 라이브러리에서 추출할 수 있다. | 텍스트 레이어가 없는 스캔 PDF에는 OCR이 필요하다. |
-| Pydantic v2 | 모듈 경계의 데이터 계약과 LLM 응답 스키마를 동일 모델로 검증할 수 있다. | 실제 OpenAI Structured Outputs 연동은 검증하지 못했다. |
+| Pydantic v2 | 모듈 경계의 데이터 계약과 LLM 응답 스키마를 동일 모델로 검증할 수 있다. | Structured Outputs 연동은 Gemini의 OpenAI 호환 레이어로만 검증했고, 실제 OpenAI 엔드포인트로는 검증하지 못했다(9절). |
 | PyYAML | 5개 문서 유형의 시그니처·가중치·임계값을 분류 코드와 분리할 수 있다. | 새 `DocType` 추가와 설정 스키마 검증에는 Python 변경이 필요하다. |
 | pytest | 원본 PDF를 공개하지 않고도 분류·마스킹·fallback 경로를 synthetic fixture로 확인할 수 있다. | 실제 문서 일반화 성능을 대신하지 못한다. |
 | matplotlib | 원본 페이지 이미지를 저장하지 않고 라벨 분포와 confusion matrix를 시각화할 수 있다. | 페이지 내용 자체는 확인할 수 없다. |
@@ -100,10 +103,15 @@ LLM에 보내는 방식은 실행마다 결과가 달라질 위험과 비용·�
 ## 4. 실행 방법
 
 **환경**: Python 3.11 이상 (3.11.5에서 검증), 의존성은 `requirements.txt`. `.env.example`을 `.env`로
-복사하고 `LLM_API_KEY`를 채우면 `LLMRuntimeConfig.enabled`가 `True`로 바뀐다.
-다만 실제 네트워크 호출부(`call_llm`)가 미구현이라 키를 채워도 실제 LLM 추론은
-수행되지 않는다(자세한 동작은 9절 참고). 키가 없으면 `hybrid` 모드가
-`LLM_DISABLED`로 rule-only와 동일하게 자동 강등된다.
+복사하고 `LLM_API_KEY`를 채우면 `LLMRuntimeConfig.enabled`가 `True`로 바뀌고,
+`hybrid` 모드에서 위임된 페이지에 대해 실제 네트워크 호출이 수행된다(자세한
+동작은 9절 참고). `LLM_BASE_URL`을 함께 설정하면 OpenAI 호환 엔드포인트를 쓸
+수 있다 — 비워두면 실제 OpenAI 엔드포인트(`api.openai.com`)를 그대로 사용한다.
+제출 시점 실행은 `LLM_BASE_URL`을 Gemini의 OpenAI 호환 엔드포인트
+(`https://generativelanguage.googleapis.com/v1beta/openai/`)로, `LLM_MODEL`을
+`gemini-2.5-flash`로 설정해 확인했다 — `LLM_API_KEY`가 Gemini AI Studio에서
+발급받은 키이기 때문이다. 키가 없으면 `hybrid` 모드가 `LLM_DISABLED`로
+rule-only와 동일하게 자동 강등된다.
 
 **주의**: 원본 파일명에 공백과 `&`가 포함되므로 모든 경로 인자를 따옴표로
 감싸야 한다.
@@ -130,7 +138,8 @@ python scripts/run.py \
   --truth data/ground_truth_package_01.csv \
   --viz
 
-# 3) hybrid 실행 (API 키가 없으면 자동으로 rule-only와 동일하게 강등)
+# 3) hybrid 실행 (API 키가 있으면 위임된 페이지에 실제 LLM 호출을 수행한다.
+#    없으면 자동으로 rule-only와 동일하게 강등된다)
 python scripts/run.py \
   --pdf "data/package_01/01.990145627_shuffled.pdf" \
   --mode hybrid \
@@ -173,11 +182,15 @@ Title Report)를 함께 제공한다. `scripts/build_ground_truth.py`가 각 페
 전량을 이 방식으로 라벨링했다.
 
 **지표**: accuracy, 클래스별 precision/recall/F1,
-`macro_f1_supported`. `macro_f1_supported`는 package_01에서 support가 1 이상인
-4개 클래스(`URLA_1003`, `INCOME_DOC`, `CREDIT_REPORT`, `TITLE_REPORT`)만 평균한
-프로젝트 정의 지표다. `OTHER`는 support 0이라 recall/F1을 0.0이 아니라 `N/A`로
-표기하고 평균에서 제외한다. 일반적인 고정 5클래스 macro-F1과 구분하기 위해
-이름을 `macro_f1_supported`로 쓰며, 전체 클래스 macro-F1처럼 표현하지 않는다.
+`macro_f1_supported`. `macro_f1_supported`는 `support > 0`인 클래스 중에서도
+**F1이 정의되는 클래스만** 평균한 프로젝트 정의 지표다(`src/evaluate.py`의
+`supported_f1_values` — F1이 `None`인 클래스는 평균에서 제외). package_01
+rule-only에서는 support>0인 4개 클래스(`URLA_1003`, `INCOME_DOC`,
+`CREDIT_REPORT`, `TITLE_REPORT`) 전부 F1이 정의돼 그대로 4개를 평균하지만,
+아래 hybrid 결과에서는 이 조건이 실제로 클래스 하나를 제외시킨다. `OTHER`는
+rule-only·hybrid 모두 support 0이라 recall/F1을 0.0이 아니라 `N/A`로 표기하고
+평균에서 제외한다. 일반적인 고정 5클래스 macro-F1과 구분하기 위해 이름을
+`macro_f1_supported`로 쓰며, 전체 클래스 macro-F1처럼 표현하지 않는다.
 
 **결과 (rule-only, package_01, 39페이지)**:
 
@@ -229,6 +242,48 @@ OTHER                  0      0       0       0      0
 이 수치는 `package_01` 39페이지 전체를 룰 개발과 평가에 함께 사용한 결과다.
 별도 검증 데이터로 측정한 일반화 성능이 아니다(12절 1항).
 
+### package_01 — hybrid 실행 결과
+
+동일한 `ground_truth_package_01.csv`를 대상으로 `--mode hybrid`를 실행했다.
+`LLM_API_KEY`(Gemini AI Studio 발급)와 `LLM_BASE_URL`(Gemini의 OpenAI 호환
+엔드포인트)을 설정한 상태로, 위임 대상 2페이지(p8, p36) 모두 실제로 LLM을
+호출했다 — `outputs/package_01_hybrid/run_report.json`의 `llm_called: 2`,
+`rule_fallback_count: 0`으로 확인된다.
+
+```
+accuracy: 0.9744 (38/39)
+macro_f1_supported: 1.0000
+
+doc_type        support  predicted  precision  recall   f1
+URLA_1003       11       11         1.0000     1.0000   1.0000
+INCOME_DOC       1        0          N/A       0.0000   N/A
+CREDIT_REPORT   18       18         1.0000     1.0000   1.0000
+TITLE_REPORT     9        9         1.0000     1.0000   1.0000
+OTHER            0        1         0.0000     N/A      N/A
+```
+
+rule-only 대비 바뀐 것은 두 가지다.
+
+- **p8(TITLE_REPORT)이 정정됐다.** rule-only의 유일한 오분류였던 p8을 LLM이
+  신뢰도 0.95로 `TITLE_REPORT`로 올바르게 판정해, `TITLE_REPORT`의 recall이
+  0.8889(8/9) → 1.0000(9/9)으로 개선됐다.
+- **p36(INCOME_DOC)이 새로 틀렸다.** rule-only에서는 맞았던 p36을 LLM이
+  신뢰도 0.70으로 `OTHER`로 오판했다(8절 참고). 그 결과 `INCOME_DOC`은 한
+  번도 예측되지 않아(predicted_count=0) precision이 0/0으로 정의되지 않고,
+  precision이 없으면 F1도 정의되지 않는다.
+
+accuracy는 38/39로 rule-only와 동일하다 — 오분류 페이지가 p8에서 p36으로
+**교체**됐을 뿐 개수는 그대로다.
+
+`macro_f1_supported`가 0.9853 → 1.0000으로 바뀐 것은 "성능이 좋아져서"가
+아니다. rule-only에서는 `INCOME_DOC`도 F1=1.0으로 평균에 포함돼 4개 클래스
+`(1.0+1.0+1.0+0.9412)/4 = 0.9853`이었다. hybrid에서는 `INCOME_DOC`의 F1이
+정의되지 않아(위 표의 `N/A`) 평균에서 **제외**되고, 남은 3개 클래스가 전부
+1.0이라 `(1.0+1.0+1.0)/3 = 1.0000`이 된다. 즉 이 수치 상승은 TITLE_REPORT의
+실제 개선과, INCOME_DOC이 평균 대상에서 통계적으로 빠진 것이 동시에 작용한
+결과다. "위임이 정답률을 개선했다"는 근거로 쓸 수 없다 — p36 한 페이지만
+보면 룰보다 오히려 나빠졌다.
+
 ### package_02 (990367284_shuffled)
 
 package_02는 정답지가 없는 추가 입력으로 사용했으며, 최초 실행에서 발견된 서식
@@ -255,6 +310,40 @@ package_02는 정답지가 없는 추가 입력으로 사용했으며, 최초 �
 | URLA_1003 | 10 |
 | INCOME_DOC | 5 |
 | OTHER | 4 |
+
+#### hybrid 실행 결과
+
+package_01과 동일한 설정(Gemini의 OpenAI 호환 엔드포인트, `gemini-2.5-flash`)으로
+package_02도 `--mode hybrid`로 실행했다. 위임 대상 4페이지(p11, p26, p32, p40)
+모두 실제로 LLM을 호출했고, `rule_fallback_count: 0`이다
+(`outputs/package_02_hybrid/run_report.json`).
+
+**package_02에는 정답지가 없으므로 이 결과가 정답률 향상을 의미하지 않는다.**
+아래는 관찰 가능한 사실만 서술한다 — 예측 분포가 바뀌었다는 것과, LLM
+신뢰도가 페이지별로 크게 갈렸다는 것.
+
+| 라벨 | rule-only | hybrid |
+|---|---|---|
+| CREDIT_REPORT | 14 | 15 |
+| TITLE_REPORT | 11 | 11 |
+| URLA_1003 | 10 | 10 |
+| INCOME_DOC | 5 | 5 |
+| OTHER | 4 | 3 |
+
+위임 4건의 LLM 판정 (`outputs/package_02_hybrid/page_results.csv`):
+
+| 페이지 | 정규화 텍스트 길이 | LLM 판정 | LLM 신뢰도 |
+|---|---|---|---|
+| p11 | 0 | OTHER | 0.10 |
+| p26 | 0 | OTHER | 0.10 |
+| p40 | 0 | OTHER | 0.10 |
+| p32 | 671 | CREDIT_REPORT | 0.95 |
+
+텍스트 레이어가 없는 3페이지(p11, p26, p40)는 LLM도 신뢰도 0.10으로
+`OTHER`를 반환했다 — 룰이든 LLM이든 텍스트가 아예 없으면 판정 근거가 없다는
+뜻이다(12절). 반면 텍스트가 있는 p32는 신뢰도 0.95로 `CREDIT_REPORT`를
+반환했다. CREDIT_REPORT 예측 수가 14 → 15로 바뀐 것은 p32 판정 결과이며,
+정답지가 없어 이 판정이 실제로 맞는지는 확인할 수 없다.
 
 #### 발견한 문제와 조치: 서식 계열 커버리지 갭
 
@@ -382,51 +471,85 @@ RD003 TITLE_REPORT:  1->32, 2->34, 3->37, 4->12, 5->22, 6->16, 7->18, 8->28
 
 ## 8. 오답 분석
 
-`package_01`에서 실제 오분류는 1건뿐이다.
+`package_01`에서 rule-only 오분류는 1건, hybrid 오분류도 1건이지만 서로
+다른 페이지다(6절).
 
-- **p8 — 유일한 실제 오분류** (정답 `TITLE_REPORT`, 예측 `OTHER`). 지도 이미지가
-  익명화 과정에서 텍스트만 남아 시그니처와 마커가 모두 없다
-  (`matched_class_count=0`, `rule_score=0.00`). 룰과 텍스트 LLM 모두 판정 근거가
-  없는, 현재 접근법의 구조적 한계 사례다.
-- **p36 — 라벨은 정답과 일치**. 예측이 정답(`INCOME_DOC`)과 일치한다. 손익계산서
-  제목이 이미지로 렌더링되어 텍스트 레이어에 없고, 매칭된 신호가 weak
-  시그니처(`CTEC`) 하나뿐이라(`rule_score=0.25`) `LOW_RULE_SCORE`로 위임됐다.
-  라벨은 맞지만 근거가 약했던 페이지이며, 이 사례가 하이브리드 설계를 채택한
-  핵심 근거다.
+- **p8 — rule-only의 유일한 오분류, hybrid에서는 LLM이 정정** (정답
+  `TITLE_REPORT`). 지도 이미지가 익명화 과정에서 텍스트만 남아 시그니처와
+  마커가 모두 없다(`matched_class_count=0`, `rule_score=0.00`) — 룰은
+  `OTHER`로 예측했다. 실제 LLM 호출에서는 신뢰도 0.95로 `TITLE_REPORT`를
+  정확히 판정했다(`outputs/package_01_hybrid/page_results.csv`). 남은
+  텍스트만으로도 LLM에게는 판정 근거가 있었다는 뜻이며, "룰과 LLM 모두 판정
+  근거가 없다"고 봤던 이전 서술은 `call_llm`이 미구현이었을 때의 가정이었을
+  뿐 실측과 다르다.
+- **p36 — rule-only에서는 라벨이 정답과 일치했으나 hybrid에서는 LLM이 오판**
+  (정답 `INCOME_DOC`). 손익계산서 제목이 이미지로 렌더링되어 텍스트
+  레이어에 없고, 매칭된 룰 신호가 weak 시그니처(`CTEC`) 하나뿐이라
+  (`rule_score=0.25`) `LOW_RULE_SCORE`로 위임됐다. rule-only 단계에서는 룰이
+  이 페이지를 맞혔지만, 실제 LLM 호출은 신뢰도 0.70으로 `OTHER`를 반환해
+  hybrid의 새 오분류가 됐다. 위임이 항상 정답률 개선으로 이어지지는 않는다는
+  실측 사례다.
 - **CREDIT_REPORT 부속 페이지 7장 orphan** — 분류 자체는
   `Credit Score Disclosure`, `XACTUS` 등 시그니처로 정확했지만 페이지 마커가
   없어 논리 재조립에서 orphan으로 미해결 상태로 노출했다. 분류 실패가 아니라
   재조립 정보 부족이다.
 
-세 사례를 포함한 상세 분석은 [`docs/ERROR_ANALYSIS.md`](docs/ERROR_ANALYSIS.md)
-참고.
+p8과 p36을 함께 보면, LLM 위임은 룰의 오분류를 정정할 수도 있고(p8) 룰의
+정답을 뒤집을 수도 있다(p36). package_01만으로는 위임 2건, package_02까지
+합쳐도 6건뿐이라 이 트레이드오프의 방향성을 일반화할 수 없다(12절).
+
+rule-only 기준 세 사례를 포함한 상세 분석은
+[`docs/ERROR_ANALYSIS.md`](docs/ERROR_ANALYSIS.md) 참고 —
+`docs/ERROR_ANALYSIS.md`는 rule-only와 hybrid 두 모드의 결과를 모두 반영한다.
 
 ## 9. AI 사용
 
 **런타임 분류**: `llm_classifier.py`는 설정 로딩, PII 마스킹, 프롬프트 구성,
-배치 분할, 응답 검증, 재시도/fallback 오케스트레이션까지 구현하고 `call_llm`을
-monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
-`gpt-5-mini`, temperature 0, Structured Outputs로 `LLMBatchResponse` 스키마를
-강제하도록 설계했다. **실제 OpenAI 네트워크 호출부(`call_llm`)는 미구현
-상태이며 항상 `NotImplementedError`를 던진다.**
+배치 분할, 응답 검증, 재시도/fallback 오케스트레이션에 더해 **실제 OpenAI
+Python SDK 네트워크 호출부(`call_llm`)까지 구현했다.**
+`client.chat.completions.parse`에 `response_format=LLMBatchResponse`(pydantic
+모델)를 그대로 전달해 Structured Outputs로 스키마를 강제하고, SDK가 반환하는
+`message.parsed`(이미 검증된 `LLMBatchResponse`)를 그대로 사용한다.
+temperature는 0으로 고정하고 `model`/`timeout_seconds`는 `LLMRuntimeConfig`에서
+가져온다. mock 기반 테스트(`call_llm`을 monkeypatch)는 이전과 동일하게
+유지된다 — 실제 네트워크 호출은 테스트에 포함되지 않는다.
 
+- **프로바이더**: OpenAI Python SDK(`openai>=1.40`)를 그대로 쓰되, 환경변수
+  `LLM_BASE_URL`로 엔드포인트를 교체할 수 있다. 비어 있으면 실제 OpenAI
+  엔드포인트(`api.openai.com`)를 사용한다. `LLMRuntimeConfig`에는
+  `api_key`/`base_url` 필드를 추가하지 않았다 — 둘 다 `call_llm` 안에서
+  `load_llm_config`와 같은 방식으로 환경변수(`LLM_API_KEY`, `LLM_BASE_URL`)를
+  직접 읽어 그 호출 한 번에만 쓰고 저장하지 않는다. **제출 시점 실행에는
+  Google Gemini의 OpenAI 호환 엔드포인트**
+  (`https://generativelanguage.googleapis.com/v1beta/openai/`)와 **모델
+  `gemini-2.5-flash`**를 사용했다 — `LLM_API_KEY`가 Gemini AI Studio에서
+  발급받은 키이기 때문이다. 실제 OpenAI 엔드포인트로는 호출을 검증하지
+  않았다.
 - **API 키 없음**: `LLMRuntimeConfig.enabled=False`가 되어 `hybrid` 모드가
-  `LLM_DISABLED` 경고와 함께 rule-only와 동일하게 자동 강등된다. 예외 없이
-  완주하며 `run_report.json`의 `mode`는 `hybrid`로 유지된다.
-- **API 키 있음**: `enabled=True`가 되지만 `call_llm`이 미구현이므로 실제
-  네트워크 추론은 수행되지 않는다. 매 시도가 `NotImplementedError`로 실패해
-  재시도(`max_retries`)를 소진한 뒤 `decision_source=RULE_FALLBACK`,
-  `warnings: ["LLM_CALL_FAILED"]`로 처리되고 최종 라벨은 룰 결과를 유지한다.
+  `LLM_DISABLED` 경고와 함께 rule-only와 동일하게 자동 강등된다(기존과 동일한
+  동작). 예외 없이 완주하며 `run_report.json`의 `mode`는 `hybrid`로 유지된다.
+- **API 키 있음**: 실제 네트워크 호출을 수행한다. `package_01`은 위임 대상
+  2페이지(p8, p36), `package_02`는 위임 대상 4페이지(p11, p26, p32, p40) 전량
+  실제로 호출했고, 두 패키지 모두 `rule_fallback_count: 0`으로 전량
+  성공했다(`outputs/package_01_hybrid/run_report.json`,
+  `outputs/package_02_hybrid/run_report.json`). 호출이 실패하면(인증 실패,
+  타임아웃, 스키마 불일치 등) `resolve_delegated_pages`가 재시도
+  (`max_retries`)를 소진한 뒤 `decision_source=RULE_FALLBACK`,
+  `warnings: ["LLM_CALL_FAILED"]`로 처리하고 최종 라벨은 룰 결과를 유지한다 —
+  이 경로는 기존 mock 테스트로 검증돼 있고 실제 호출 구현 후에도 로직은
+  그대로다.
 - **테스트된 범위**: PII 마스킹, 요청/프롬프트 구성, 배치 분할, 응답 검증(잘못된
-  라벨 처리, 응답 개수 불일치 포함), 재시도, rule fallback.
-- **테스트되지 않은 범위**: `gpt-5-mini` 모델명의 실제 유효성, 실제 OpenAI API
-  스펙, 실제 Structured Outputs 호출, 실제 모델의 정확도·지연시간·비용. 측정된
-  실제 LLM 판정 성능은 없다.
+  라벨 처리, 응답 개수 불일치 포함), 재시도, rule fallback — 전부 `call_llm`을
+  monkeypatch한 mock 기반 pytest로 검증한다.
+- **테스트되지 않은/제한적으로만 확인된 범위**: 실제 OpenAI 엔드포인트로의
+  호출(Gemini 호환 레이어만 사용), 대규모 배치·비용·지연시간·응답 안정성(두
+  패키지 합쳐 6페이지, 배치 2회만 확인), `gemini-2.5-flash` 외 다른 모델의
+  동작.
 
-`outputs/package_01_hybrid`는 이 자동 강등을 확인한 산출물이다 — 실제 LLM
-추론 결과가 아니라, LLM이 비활성화된 상태(`llm_config.enabled: false`)에서
-`hybrid` 모드가 `LLM_DISABLED` 경고를 남기고 rule-only와 동일한 라벨로
-완주하는지 확인한 결과다(`outputs/package_01_hybrid/run_report.json`).
+`outputs/package_01_hybrid`와 `outputs/package_02_hybrid`는 **실제 LLM 추론
+결과**다 — `llm_config.enabled: true`이고 각각 `llm_called: 2`, `llm_called: 4`,
+두 패키지 모두 `rule_fallback_count: 0`으로 확인된다. (이전에는 API 키 없이
+자동 강등만 확인한 산출물이었으나, `call_llm` 구현 후 재실행해 교체했다.)
 
 **개발 보조**: 이 코드베이스는 Claude Code와 Codex를 사용해 작성했다.
 `src/schema.py`와 `config/rules.yaml`을 인터페이스 계약으로 고정하고
@@ -474,15 +597,21 @@ monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
    수 없다.
 2. `package_01`의 클래스 분포가 작고 불균형하다. `INCOME_DOC` 정답은 1페이지뿐이고
    `OTHER` 정답은 0페이지라 해당 클래스들의 지표와 분류 경로 해석에 한계가 있다.
-3. 실제 LLM 네트워크 호출부(`call_llm`)가 미구현이다. 위임 경로, 응답 검증,
-   재시도, fallback은 테스트로 확인했지만 `gpt-5-mini` 모델 문자열과 Structured
-   Outputs API 스펙을 실제 호출로 확인하지 않았고, 실제 모델 판정 성능도
-   측정하지 못했다.
+3. 실제 LLM 네트워크 호출부(`call_llm`)는 구현되어 있고 두 패키지 모두에서
+   실행을 확인했지만(9절), 검증 규모가 작다 — 위임 대상은 package_01 2건,
+   package_02 4건, 총 6페이지·배치 2회뿐이다. 대규모 배치 처리, 재시도가
+   실제로 발동하는 경우, 응답 지연시간·비용, 응답 안정성(같은 입력을 반복
+   호출했을 때 동일한 결과가 나오는지)은 측정하지 않았다. 또한 실제 OpenAI
+   엔드포인트가 아니라 Gemini의 OpenAI 호환 레이어로만 확인했으므로,
+   `gpt-5-mini`를 포함한 실제 OpenAI 모델의 동작은 여전히 검증되지 않았다.
 4. OCR fallback이 없다. `package_01` 39페이지는 전부 텍스트 레이어가 있었지만,
    `package_02`의 p11/p26/p40은 정규화 텍스트 길이가 0이다(6절). 따라서
    "이 데이터셋은 OCR이 불필요하다"는 결론을 전체 패키지로 일반화할 수 없다.
-   텍스트가 없는 페이지는 텍스트 전용 LLM을 연결해도 해결되지 않는다. OCR
-   또는 Vision 기반 처리가 필요하지만 이번 제출 범위에서는 구현하지 않았다.
+   텍스트가 없는 페이지는 텍스트 전용 LLM을 연결해도 해결되지 않는다 — 실제
+   LLM 호출로도 이를 확인했다: p11/p26/p40 세 페이지 모두 신뢰도 0.10으로
+   `OTHER`를 반환했다(`outputs/package_02_hybrid/page_results.csv`, 6절).
+   OCR 또는 Vision 기반 처리가 필요하지만 이번 제출 범위에서는 구현하지
+   않았다.
 5. 다중 문서 인스턴스 재조립 실패가 `package_02`에서 실제로 확인됐다(6절).
    동일한 마커 구조를 가진 ALTA 커미트먼트 2부와 IRS 트랜스크립트 2건이 각각
    하나의 reconstructed document로 병합됐다. `keep_both_and_flag` 정책 덕분에
@@ -499,8 +628,12 @@ monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
 8. 문서 식별자(`loan_number` 등) 추출이 실패한다. 레이아웃 기반 PDF에서 라벨과
    값의 텍스트 스트림상 근접성이 보장되지 않기 때문이다. 개선 방향은 좌표 기반
    추출(`get_text("words")`)이다.
-9. p8처럼 내용이 제거되어 문맥이 거의 남지 않은 페이지는 룰과 텍스트 LLM 모두
-   처리하기 어렵다.
+9. p8처럼 내용이 제거되어 문맥이 거의 남지 않은 페이지는 룰로는 처리하기
+   어렵다 — 다만 p8은 실제 LLM 호출로는 신뢰도 0.95로 정확히 분류돼(8절),
+   남은 텍스트가 극히 적어도 텍스트 LLM이 항상 무력하지는 않다는 것이 실측으로
+   확인됐다. 반대로 텍스트 자체가 없는 페이지(4항의 p11/p26/p40)는 텍스트
+   LLM으로도 해결되지 않는다 — 문맥이 "거의 없는" 경우와 "전혀 없는" 경우를
+   구분해야 한다.
 10. 인명 마스킹은 정규식 휴리스틱이라 완전성을 보장하지 못한다. 또한 소득
     서류처럼 금액 구조 자체가 분류 신호인 문서(p36)에서는 무차별 숫자 마스킹이
     그 신호를 파괴한다는 점도 확인했다.
@@ -514,5 +647,9 @@ monkeypatch한 mock 기반 테스트로 검증했다. provider `openai`, model
     `package_01` 평가를 수행할 수 없고, 지금까지 모든 테스트는 로컬에서만
     실행했다(102 passed, 1 warning). 개선 방향은 PDF 없이도 동작하는 synthetic
     fixture 기반 결정론적 테스트만 CI로 분리하는 것이다.
+15. LLM 위임이 항상 정답률 개선으로 이어지지는 않는다. `package_01`의 p36에서
+    실제 LLM 호출이 룰보다 나쁜 판정(`INCOME_DOC` → `OTHER`, 신뢰도 0.70)을
+    내려 hybrid의 새로운 오분류가 됐다(6·8절). 위임 대상이 6페이지뿐이라 이
+    트레이드오프의 방향성을 일반화할 수 없다.
 
 실 운영에서는 필드 단위 선택적 마스킹이나 온프레미스 모델이 필요하다.

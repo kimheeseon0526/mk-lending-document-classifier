@@ -3,8 +3,10 @@
 주요 기술적 의사결정과 검토했으나 채택하지 않은 대안을 기록한다. `README.md`의
 아키텍처·평가 절 요약을 전제로, 여기서는 각 결정의 배경·대안·근거·한계를
 실측값과 함께 상세히 다룬다. 검증 근거는 `outputs/package_01/evaluation.json`,
-`outputs/package_01/run_report.json`, `outputs/package_02/run_report.json`,
-`docs/ERROR_ANALYSIS.md`에 있다.
+`outputs/package_01/run_report.json`, `outputs/package_01_hybrid/run_report.json`,
+`outputs/package_02/run_report.json`, `outputs/package_02_hybrid/page_results.csv`,
+`docs/ERROR_ANALYSIS.md`에 있다. `docs/ERROR_ANALYSIS.md`는 hybrid 실행 결과
+반영 전(rule-only 기준) 문서다.
 
 아래 결정 대부분은 `package_01` 데이터만으로 내려졌다. `package_02`는
 정답지가 없어 독립 검증셋이 아니라 룰 적응(서식 커버리지 확장)에 사용한
@@ -35,12 +37,13 @@ True인 페이지만 LLM에 위임하는 하이브리드 구조를 채택했다.
 과적합이 확정적이다.
 
 ### Limitation
-실제 LLM 호출부(`call_llm`)가 미구현이라, 위임된 2장에 대한 실제 모델 판정
-성능은 측정되지 않았다. 또한 이 위임 경로는 텍스트 기반이므로 정규화 텍스트
+위임된 2장의 실제 모델 판정이 항상 옳지는 않다 — p8은 LLM이 정정했지만
+(`TITLE_REPORT`, 신뢰도 0.95) p36은 LLM이 룰의 정답을 뒤집었다(`OTHER`, 신뢰도
+0.70; README 6·8절). 또한 이 위임 경로는 텍스트 기반이므로 정규화 텍스트
 길이가 0인 페이지에는 원리상 통하지 않는다 — `package_02`의 p11/p26/p40이
-이 경우로, 텍스트 전용 LLM에 위임해도 보낼 텍스트 자체가 없어 해결되지
-않는다(package_02에서 확인됨, README 6·12절). OCR/Vision 기반 처리가
-필요하지만 구현하지 않았다.
+이 경우로, 실제 LLM 호출도 신뢰도 0.10으로 `OTHER`를 반환해 텍스트 전용
+LLM으로는 해결되지 않는다는 예상이 실측으로 확인됐다(README 6·12절).
+OCR/Vision 기반 처리가 필요하지만 구현하지 않았다.
 
 ---
 
@@ -244,34 +247,46 @@ Client Code, Docket 번호, 계좌번호 등을 오인식할 위험이 있고, �
 
 ---
 
-## Decision: 실제 LLM 호출부를 미구현으로 남긴 판단
+## Decision: 호출부 없는 골격을 먼저 검증한 뒤 실제 네트워크 호출을 붙임
 
 ### Context
 하이브리드 파이프라인은 API 키 유무와 무관하게 항상 완주해야 하고, 위임·검증·
-재시도·fallback 경로가 먼저 검증돼야 나중에 키를 넣었을 때 바로 신뢰할 수
-있다.
+재시도·fallback 경로가 먼저 검증돼야 나중에 실제 호출을 붙였을 때 바로 신뢰할
+수 있다.
 
 ### Decision
-설정 로딩, PII 마스킹, 프롬프트 구성, 배치 분할, 응답 검증, 재시도,
-fallback 오케스트레이션까지 전부 구현하고 테스트하되, 실제 OpenAI 네트워크
-호출부(`call_llm`)는 `NotImplementedError`로 남긴다.
+1단계로 설정 로딩, PII 마스킹, 프롬프트 구성, 배치 분할, 응답 검증, 재시도,
+fallback 오케스트레이션까지 전부 구현·테스트하고 `call_llm`은
+`NotImplementedError`로 남겨 골격만 검증했다. 이후 2단계로 `call_llm`을
+OpenAI Python SDK의 `chat.completions.parse` + `response_format=LLMBatchResponse`
+(Structured Outputs)로 실제 구현했다. `LLMRuntimeConfig`에는 `api_key`/`base_url`
+필드를 추가하지 않고(스키마를 인터페이스 계약으로 고정한 원칙 유지, README
+9·10절), 두 값 모두 `call_llm` 안에서 `load_llm_config`와 같은 방식으로
+환경변수(`LLM_API_KEY`, `LLM_BASE_URL`)를 직접 읽어 그 호출 한 번에만 쓰고
+저장하지 않는다.
 
 ### Alternatives
-- 실제 네트워크 호출부까지 구현
+- 골격 없이 처음부터 실제 호출부까지 한 번에 구현
+- `LLMRuntimeConfig`에 `api_key`/`base_url` 필드 추가
 
 ### Reason
-API 키가 없으면(`llm enabled: False`) 파이프라인 전체가 rule-only와 동일하게
-자동 강등되어 예외 없이 완주한다 — `hybrid` 모드로 실행해도 `run_report.json`에
-`mode: "hybrid"`가 유지되고 `warnings: ["LLM_DISABLED"]`가 기록된다. 요청받은
-모드를 몰래 rule-only로 바꾸지 않는다. API 키를 넣어도 `call_llm`이
-미구현이므로 실제 비교는 아직 불가능하다 — 매 시도가 `NotImplementedError`로
-실패해 재시도 소진 후 `RULE_FALLBACK`으로 처리된다. 검증된 실패 경로: 응답
-개수 불일치(`LLM_COUNT_MISMATCH`), 허용되지 않은 라벨/범위 밖 confidence(항목
-제외), 재시도 소진 후 `RULE_FALLBACK`(doc_type은 룰 결과 유지).
+골격을 먼저 검증한 이유는 원래 판단과 동일하다 — API 키가 없으면
+(`llm enabled: False`) 파이프라인 전체가 rule-only와 동일하게 자동 강등되어
+예외 없이 완주해야 하고, 이 경로는 실제 호출 구현 유무와 무관하게 항상
+성립해야 한다. `LLMRuntimeConfig`에 필드를 추가하지 않은 이유는 이 스키마가
+저장 산출물과 함께 인터페이스 계약으로 고정되어 있고, 자격 증명을 여기 흘려
+넣으면 어딘가에서 직렬화·로그될 위험이 생기기 때문이다 — 대신 `call_llm`
+호출 시점에만 환경에서 읽고 그 함수 스코프를 벗어나지 않게 했다. 실제
+구현 후 두 패키지 모두에서 실행해 `rule_fallback_count: 0`(package_01 2건,
+package_02 4건 전량 성공)을 확인했다(README 6·9절).
 
 ### Limitation
-`gpt-5-mini` 모델 문자열과 Structured Outputs API 스펙을 실제 호출로
-검증하지 못했다. 실제 모델 판정 성능은 측정되지 않았다.
+검증 규모가 작다 — 총 6페이지, 배치 2회뿐이다. 대규모 배치, 실제 재시도가
+발동하는 사례, 비용·지연시간, 응답 안정성은 측정하지 않았다. 실제 OpenAI
+엔드포인트가 아니라 Gemini의 OpenAI 호환 레이어(`base_url` 교체)로만
+검증해, `gpt-5-mini`를 포함한 실제 OpenAI 모델의 동작은 여전히 확인되지
+않았다. 또한 위임이 항상 룰보다 나은 것은 아니다 — package_01 p36에서는
+LLM이 룰의 정답(`INCOME_DOC`)을 `OTHER`로 뒤집었다(신뢰도 0.70).
 
 ---
 

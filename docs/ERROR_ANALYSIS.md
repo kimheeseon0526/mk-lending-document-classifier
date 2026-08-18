@@ -1,19 +1,22 @@
 # Error Analysis
 
-`package_01` 39페이지 실행(rule-only) 기준 실측 요약: 실제 오분류 1건(p8),
-LLM 위임 대상 2건(p8, p36), 논리 재조립 orphan 9건. 실제로 확인된 사례만
-기록한다.
+`package_01` 39페이지 실측 요약. LLM 위임 대상은 rule-only·hybrid 실행 모두
+2건(p8, p36)으로 동일하다. `rule-only` 실행(LLM을 호출하지 않는 모드)에서는
+오분류가 p8 1건이었고, 실제 LLM 호출까지 수행한 `hybrid` 실행에서는 오분류가
+p36 1건으로 교체됐다 — 두 모드 모두 오분류 개수는 1건이지만 페이지가 다르다.
+논리 재조립 orphan은 두 모드 모두 9건으로 동일하다. 실제로 확인된 사례만
+기록하며, 각 사례에는 어느 실행 모드 기준인지 명시한다.
 
 ## 페이지 단위 사례
 
 ### Page 8 — 정답 TITLE_REPORT
 
-**예측:** OTHER
+**rule-only 예측:** OTHER (오분류)
 
-**실행 모드:** rule-only
+**hybrid 예측:** TITLE_REPORT, LLM 신뢰도 0.95 (정답으로 정정됨)
 
-**원인:** 페이지 전체 텍스트가 다음 두 줄뿐이다(정규화 길이 68자, `package_01`
-전체에서 가장 짧음).
+**원인 (rule-only):** 페이지 전체 텍스트가 다음 두 줄뿐이다(정규화 길이 68자,
+`package_01` 전체에서 가장 짧음).
 
 ```
 [ Plat map removed in anonymized sample ]
@@ -23,45 +26,65 @@ LLM 위임 대상 2건(p8, p36), 논리 재조립 orphan 9건. 실제로 확인�
 지적도 이미지가 익명화 과정에서 제거되고 대체 텍스트만 남아, `TITLE_REPORT`
 시그니처와 페이지 마커가 모두 없다(`matched_class_count=0`, `rule_score=0.00`).
 
-**Fallback 동작:** `SHORT_TEXT`, `LOW_RULE_SCORE` 사유로 LLM 위임 대상에
-포함됐다(`run_report.json`의 `llm_target_pages: [8, 36]`). 그러나 실제 LLM
-호출부가 미구현이고 API 키도 없어 호출 자체가 발생하지 않았고, 룰의 `OTHER`
-예측이 최종 라벨로 남았다.
+**Fallback 동작 (rule-only):** `SHORT_TEXT`, `LOW_RULE_SCORE` 사유로 LLM 위임
+대상에 포함됐다(`run_report.json`의 `llm_target_pages: [8, 36]`). `rule-only`
+모드는 설계상 위임 대상이어도 LLM을 호출하지 않으므로(`llm_called: 0`), 룰의
+`OTHER` 예측이 그대로 최종 라벨로 남았다.
 
-**개선 방향:** 재조립 문맥(이 페이지가 `CLTA` 마커 기준 8번째 장 다음이라는
-사실)을 활용한 문맥 기반 추론. 다만 텍스트 자체에는 판정 근거가 없어 텍스트
-전용 LLM으로도 해결이 어렵다.
+**hybrid 실행 결과:** `LLM_API_KEY`/`LLM_BASE_URL`(Gemini의 OpenAI 호환
+엔드포인트)을 설정한 `hybrid` 모드에서는 이 페이지가 실제로 LLM에 위임돼
+호출됐다. LLM은 `TITLE_REPORT`를 신뢰도 0.95로 반환했고
+(`outputs/package_01_hybrid/page_results.csv`), 최종 라벨이 `TITLE_REPORT`로
+정정돼 hybrid 실행에서는 이 페이지가 오분류가 아니다
+(`outputs/package_01_hybrid/evaluation.json`의 `misclassified_pages: [36]` —
+p8은 포함되지 않는다).
 
-**남은 위험:** 이 페이지는 현재 접근법(룰 + 텍스트 LLM)으로 구조적으로 해결
-불가하다. 시그니처도 마커도 없는 페이지를 `OTHER`로 분류하는 것 자체는
-오히려 합리적인 결과일 수 있다는 점을 정직하게 남겨둔다.
+**개선 방향:** rule-only 단계에서는 재조립 문맥(이 페이지가 `CLTA` 마커
+기준 8번째 장 다음이라는 사실)을 활용한 문맥 기반 추론이 대안이 될 수 있다.
+다만 hybrid 실행에서 확인했듯, 룰이 실패한 이유(시그니처·마커 부재)가 곧
+LLM도 실패하는 이유는 아니었다 — 남은 텍스트가 두 줄뿐이어도 LLM은 판정
+근거를 찾아냈다.
+
+**남은 위험:** rule-only만으로는 이 페이지를 구조적으로 해결할 수 없다는
+서술은 여전히 맞다. 다만 "룰과 텍스트 LLM 모두 판정 근거가 없다"던 이전
+서술은 hybrid 실행에서 확인한 실측과 다르므로 정정한다. 신뢰도 0.95인 단일
+사례이므로, 텍스트가 극히 적은 다른 페이지에서도 LLM이 항상 성공한다고
+일반화할 수는 없다.
 
 ---
 
-### Page 36 — 정답 INCOME_DOC (오분류가 아니다)
+### Page 36 — 정답 INCOME_DOC
 
-**예측:** INCOME_DOC
+**rule-only 예측:** INCOME_DOC (정답과 일치하지만 근거가 약함, 오분류가 아니다)
 
-**실행 모드:** rule-only
+**hybrid 예측:** OTHER, LLM 신뢰도 0.70 (오분류)
 
-**원인:** 손익계산서(Profit & Loss Statement)이지만 제목이 이미지로
+**원인 (rule-only):** 손익계산서(Profit & Loss Statement)이지만 제목이 이미지로
 렌더링되어 텍스트 레이어에 없다. Paystub, W-2, Form 1040, 1099 등 표준 소득
 서류 키워드가 전혀 없고, 매칭된 신호는 weak 시그니처 `CTEC`(가중치 0.25)
 하나뿐이다. `rule_score = 0.25 < 0.60`(임계값)이라 `LOW_RULE_SCORE`로
 분류된다. 스캔 이미지 5개를 포함한다.
 
-**Fallback 동작:** `LOW_RULE_SCORE` 사유로 LLM 위임 대상에 포함됐다. 실제
-호출은 발생하지 않았지만, 룰이 낸 예측(`INCOME_DOC`)이 이미 정답과 일치해
-최종 라벨도 정답으로 유지된다.
+**Fallback 동작 (rule-only):** `LOW_RULE_SCORE` 사유로 LLM 위임 대상에
+포함됐다. `rule-only` 모드는 위임 대상이어도 LLM을 호출하지 않으므로, 룰이
+낸 예측(`INCOME_DOC`)이 이미 정답과 일치해 최종 라벨도 정답으로 유지된다.
 
-**개선 방향:** 실제 LLM 호출부 구현 후 재검증이 필요하다 — 현재는 "우연히
-맞은 라벨"이라 이 결과만으로 신뢰할 수 없다.
+**hybrid 실행 결과:** 실제로 LLM에 위임돼 호출됐고, LLM은 `OTHER`를 신뢰도
+0.70으로 반환했다(`outputs/package_01_hybrid/page_results.csv`) — 룰의
+정답(`INCOME_DOC`)을 뒤집었다. hybrid 실행에서는 이 페이지가 유일한
+오분류가 됐다(`outputs/package_01_hybrid/evaluation.json`의
+`misclassified_pages: [36]`).
 
-**남은 위험:** **이 사례는 오답이 아니다.** 룰이 낸 라벨이 정답과 일치하지만
-근거(`rule_score=0.25`)가 임계값(0.60)에 크게 못 미쳐 신뢰할 수 없는
-상태였다. "라벨은 맞을 수 있어도 근거가 약해 추가 검증이 필요한 페이지가
-실제로 존재한다"는 사실 — 바로 이 지점이 룰 단독이 아니라 하이브리드(룰 +
-LLM) 구조를 채택한 핵심 근거다.
+**개선 방향:** rule-only 단계에서 남겨뒀던 "실제 LLM 호출부 구현 후 재검증이
+필요하다"는 항목은 이번 hybrid 실행으로 재검증을 마쳤다 — 결과는 "우연히
+맞았던 라벨이 실제 LLM 앞에서는 틀렸다"였다. 위임이 항상 정답률을 개선하지는
+않는다는 것이 이 페이지에서 확인됐다.
+
+**남은 위험:** **이 사례는 rule-only에서는 오답이 아니었지만 hybrid에서는
+오답이다.** rule-only 단계에서 근거 없이 맞혔다는 우려(`rule_score=0.25`,
+임계값 0.60 미달)가 hybrid 실행에서 실제로 현실화된 사례이며, 하이브리드
+구조를 채택한 근거(룰 단독은 신뢰할 수 없음)와 하이브리드의 한계(LLM도
+항상 옳지는 않음)를 동시에 보여준다.
 
 ---
 
@@ -70,7 +93,8 @@ LLM) 구조를 채택한 핵심 근거다.
 **예측:** 7장 전부 `CREDIT_REPORT`로 정확히 예측됨 (p13, p17, p21, p23, p25,
 p29 등)
 
-**실행 모드:** rule-only
+**실행 모드:** rule-only·hybrid 동일. 이 7페이지는 LLM 위임 대상(p8, p36)에
+포함되지 않아 두 모드에서 예측·orphan 결과가 같다.
 
 **원인:** `Credit Score Disclosure`, `Your Credit Score and the Price You
 Pay for Credit`, `XACTUS` 등 강한 시그니처로 `CREDIT_REPORT`로 정확히
